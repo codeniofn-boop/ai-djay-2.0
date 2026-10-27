@@ -389,7 +389,10 @@ def quantize_to_grid(sr: int, audio: np.ndarray, strength: float = 1.0, bpm_hint
     bar = 4 * beat
     start = down
     end = dst_pts[-1]
-    bars = max(1, int(np.ceil((end - start) / bar - 0.02)))
+    # musical length follows the last transient; a decay tail only adds a bar when it runs
+    # more than one beat past that bar line
+    last_k = max(slots) if slots else 0
+    bars = max(1, last_k // 16 + 1, int(np.ceil((end - start) / bar - 0.25)))
     out_len = int(round(bars * bar * sr))
     t_out = np.arange(out_len) / sr + start
     t_src = np.interp(t_out, dst_pts, src_pts)
