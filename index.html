@@ -1,0 +1,1220 @@
+<title>AI DJay 2.0</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@600;700&family=Barlow:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: a DJ booth. Top strip = status LEDs + master clock. Below, a 12-column rack:
+   Deck (file + metadata) | Monitor (waveform, transport, spectrum, VU), then FX rack | AI console.
+   Single committed dark neon look (performance booth), stacks to one column under 820px. */
+:root{
+  color-scheme:dark;
+  --bg:#06080e; --bg-2:#0b0f18; --panel:#0f1420; --panel-2:#141b2a;
+  --line:#1d2738; --line-2:#2b3850;
+  --fg:#e8edf7; --fg-2:#9aa7bf; --fg-3:#6b778f;
+  --cyan:#19f0ff; --magenta:#ff2ea6; --lime:#b6ff3b; --amber:#ffb020; --red:#ff3b5c;
+  --glow-c:0 0 12px rgba(25,240,255,.55); --glow-m:0 0 12px rgba(255,46,166,.55);
+  --font-display:'Chakra Petch','Rajdhani','Arial Narrow',sans-serif;
+  --font-body:'Barlow','Helvetica Neue',Arial,sans-serif;
+  --font-mono:'JetBrains Mono','SFMono-Regular',Consolas,monospace;
+  --radius:6px;
+}
+*,*::before,*::after{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--font-body);font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased;
+  background-image:radial-gradient(1200px 520px at 50% -12%,rgba(25,240,255,.08),transparent 60%),radial-gradient(900px 420px at 100% 100%,rgba(255,46,166,.07),transparent 60%)}
+.booth{min-height:100%;display:flex;flex-direction:column;gap:12px;max-width:1480px;margin:0 auto;padding-block:12px 22px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+
+/* top bar */
+.topbar{display:flex;align-items:center;gap:18px;flex-wrap:wrap;padding:10px 14px;background:linear-gradient(180deg,var(--panel-2),var(--panel));border:1px solid var(--line);border-radius:var(--radius);position:relative;overflow:hidden}
+.topbar::after{content:"";position:absolute;left:0;right:0;bottom:0;height:2px;background:linear-gradient(90deg,var(--cyan),var(--magenta));opacity:.85}
+.brand{display:flex;align-items:center;gap:10px;font-family:var(--font-display);font-weight:700;letter-spacing:.04em}
+.brand-mark{display:inline-grid;place-items:center;width:36px;height:28px;border:1px solid var(--cyan);color:var(--cyan);border-radius:4px;box-shadow:var(--glow-c),inset 0 0 8px rgba(25,240,255,.25);font-size:13px}
+.brand-name{font-size:22px;text-transform:uppercase;line-height:1}
+.brand-name em{font-style:normal;color:var(--magenta);text-shadow:var(--glow-m)}
+.brand-sub{font-family:var(--font-mono);font-size:10px;color:var(--fg-3);letter-spacing:.14em;text-transform:uppercase;align-self:flex-end;padding-bottom:2px}
+.leds{display:flex;gap:16px;flex-wrap:wrap}
+.led{display:flex;align-items:center;gap:7px;font-family:var(--font-mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--fg-3)}
+.led i{width:9px;height:9px;border-radius:50%;background:#2a3348;box-shadow:inset 0 0 2px #000;flex:none;transition:background .2s,box-shadow .2s}
+.led b{color:var(--fg-2);font-weight:600}
+.led.on i{background:var(--lime);box-shadow:0 0 8px var(--lime)}
+.led.on b{color:var(--lime)}
+.led.warn i{background:var(--amber);box-shadow:0 0 8px var(--amber)}
+.led.warn b{color:var(--amber)}
+.led.hot i{background:var(--cyan);box-shadow:0 0 8px var(--cyan)}
+.led.hot b{color:var(--cyan)}
+.led.busy i{background:var(--magenta);box-shadow:0 0 8px var(--magenta);animation:pulse 1s infinite}
+.led.busy b{color:var(--magenta)}
+.clock{margin-left:auto;display:flex;gap:18px;font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+.clock-cell{display:flex;flex-direction:column;align-items:flex-end;line-height:1.1}
+.clock-cell span{font-size:10px;letter-spacing:.14em;color:var(--fg-3)}
+.clock-cell b{font-size:17px;font-weight:600;color:var(--cyan);text-shadow:0 0 10px rgba(25,240,255,.35);white-space:nowrap}
+
+/* rack grid */
+.rack{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:12px;align-items:start}
+.col-main{display:flex;flex-direction:column;gap:12px;min-width:0}
+.row-top{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:12px;align-items:stretch}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:14px;min-width:0;position:relative;display:flex;flex-direction:column;gap:12px}
+.panel::before{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;background:repeating-linear-gradient(0deg,rgba(255,255,255,.014) 0 1px,transparent 1px 3px)}
+@media (max-width:1100px){.rack{grid-template-columns:minmax(0,1fr)}}
+@media (max-width:820px){.row-top{grid-template-columns:minmax(0,1fr)}}
+.panel-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding-bottom:8px}
+.panel-head h2{margin:0;font-family:var(--font-display);font-size:13px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:var(--fg-2);display:flex;align-items:center;gap:8px}
+.panel-head h2::before{content:"";width:6px;height:6px;background:var(--cyan);box-shadow:var(--glow-c);transform:rotate(45deg)}
+.ai .panel-head h2::before{background:var(--magenta);box-shadow:var(--glow-m)}
+.chip{font-family:var(--font-mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;padding:3px 8px;border:1px solid var(--line-2);border-radius:3px;color:var(--fg-2);white-space:nowrap}
+.chip.armed{border-color:var(--lime);color:var(--lime);box-shadow:0 0 8px rgba(182,255,59,.3)}
+.chip.demo{border-color:var(--amber);color:var(--amber)}
+.chip.err{border-color:var(--red);color:var(--red)}
+.chip.busy{border-color:var(--cyan);color:var(--cyan)}
+
+/* deck */
+.dropzone{display:flex;align-items:center;gap:14px;padding:16px;border:1px dashed var(--line-2);border-radius:var(--radius);background:rgba(25,240,255,.03);cursor:pointer;transition:border-color .15s,background .15s,box-shadow .15s}
+.dropzone:hover,.dropzone:focus-visible{border-color:var(--cyan);box-shadow:var(--glow-c);outline:none}
+.dropzone.over{border-style:solid;border-color:var(--cyan);background:rgba(25,240,255,.1);box-shadow:var(--glow-c)}
+.dropzone.compact{padding:10px 14px}
+.dropzone.compact .dz-icon{width:28px;height:28px}
+.dropzone.compact .dz-text b{font-size:13px}
+.dz-icon{width:42px;height:42px;flex:none;color:var(--cyan)}
+.dz-text{display:flex;flex-direction:column;gap:2px;min-width:0}
+.dz-text b{font-family:var(--font-display);font-size:15px;letter-spacing:.02em}
+.dz-text span{color:var(--fg-3);font-size:12px}
+.track{display:flex;flex-direction:column;gap:10px}
+.track-name{font-family:var(--font-display);font-size:19px;font-weight:700;line-height:1.15;overflow-wrap:anywhere;text-wrap:balance}
+.track-sub{font-size:12px;color:var(--fg-2);overflow-wrap:anywhere}
+.meta{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:0}
+.meta div{display:flex;flex-direction:column;gap:2px;padding:8px 10px;background:var(--bg-2);border:1px solid var(--line);border-radius:4px;min-width:0}
+.meta dt{font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--fg-3);font-family:var(--font-mono)}
+.meta dd{margin:0;font-family:var(--font-mono);font-size:13px;color:var(--fg);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.meta dd.hi{color:var(--cyan)}
+.track-actions{display:flex;gap:8px;flex-wrap:wrap}
+.deck-status{font-family:var(--font-mono);font-size:11px;color:var(--fg-3);letter-spacing:.04em;min-height:1.4em}
+.deck-status.err{color:var(--amber)}
+
+/* buttons */
+.btn{font-family:var(--font-display);font-weight:600;font-size:12px;letter-spacing:.12em;text-transform:uppercase;padding:9px 14px;border-radius:4px;border:1px solid var(--line-2);background:var(--panel-2);color:var(--fg);cursor:pointer;transition:box-shadow .15s,border-color .15s,background .15s,transform .05s}
+.btn:hover:not(:disabled){border-color:var(--fg-3)}
+.btn:active:not(:disabled){transform:translateY(1px)}
+.btn:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn.primary{border-color:var(--cyan);color:var(--cyan);background:rgba(25,240,255,.08)}
+.btn.primary:hover:not(:disabled){box-shadow:var(--glow-c);background:rgba(25,240,255,.15);border-color:var(--cyan)}
+.btn.magenta{border-color:var(--magenta);color:var(--magenta);background:rgba(255,46,166,.08)}
+.btn.magenta:hover:not(:disabled){box-shadow:var(--glow-m);background:rgba(255,46,166,.15);border-color:var(--magenta)}
+.btn.ghost{background:transparent}
+.btn.sm{padding:6px 10px;font-size:11px}
+
+/* monitor */
+.wave{width:100%;height:124px;display:block;border:1px solid var(--line);border-radius:4px;background:var(--bg-2);cursor:crosshair;touch-action:none;max-width:100%}
+.spec{width:100%;height:88px;display:block;border:1px solid var(--line);border-radius:4px;background:var(--bg-2);max-width:100%}
+.transport{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.tbtn{width:44px;height:40px;display:inline-grid;place-items:center;border-radius:4px;border:1px solid var(--line-2);background:var(--panel-2);color:var(--fg);cursor:pointer;font-family:var(--font-display);font-size:11px;font-weight:600;letter-spacing:.12em;transition:box-shadow .15s,border-color .15s,color .15s,background .15s}
+.tbtn svg{width:18px;height:18px;fill:currentColor}
+.tbtn:hover:not(:disabled){border-color:var(--fg-3)}
+.tbtn:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+.tbtn:disabled{opacity:.4;cursor:not-allowed}
+.tbtn.play{width:66px;border-color:var(--lime);color:var(--lime)}
+.tbtn.play.on{background:rgba(182,255,59,.16);box-shadow:0 0 12px rgba(182,255,59,.45)}
+.tbtn.toggle{width:auto;padding:0 12px}
+.tbtn.toggle.on{border-color:var(--magenta);color:var(--magenta);box-shadow:var(--glow-m);background:rgba(255,46,166,.1)}
+.xport-time{margin-left:auto;font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:14px;display:flex;gap:6px;align-items:baseline}
+.xport-time b{font-weight:600;color:var(--cyan)}
+.xport-time span{color:var(--fg-3)}
+.vu-wrap{display:flex;align-items:center;gap:8px;margin-left:auto;min-width:0;flex:1 1 200px;max-width:340px}
+.vu{flex:1;height:16px;display:block;min-width:0}
+.vu-label{font-family:var(--font-mono);font-size:10px;letter-spacing:.14em;color:var(--fg-3)}
+.clip{font-family:var(--font-mono);font-size:10px;letter-spacing:.12em;padding:3px 7px;border:1px solid var(--line-2);border-radius:3px;color:var(--fg-3);transition:all .1s}
+.clip.on{border-color:var(--red);color:var(--red);box-shadow:0 0 10px rgba(255,59,92,.5);background:rgba(255,59,92,.14)}
+.monitor-foot{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font-family:var(--font-mono);font-size:11px;color:var(--fg-3)}
+.monitor-foot b{color:var(--fg-2);font-weight:500}
+
+/* FX rack */
+.strips{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+@media (max-width:640px){.strips{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.strip{display:flex;flex-direction:column;gap:8px;padding:12px;background:var(--bg-2);border:1px solid var(--line);border-radius:4px;min-width:0;--c:var(--cyan);--cg:rgba(25,240,255,.35)}
+.strip.m{--c:var(--magenta);--cg:rgba(255,46,166,.35)}
+.strip.l{--c:var(--lime);--cg:rgba(182,255,59,.35)}
+.strip.a{--c:var(--amber);--cg:rgba(255,176,32,.35)}
+.strip-head{display:flex;justify-content:space-between;align-items:baseline;gap:6px}
+.strip-name{font-family:var(--font-display);font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--fg-2)}
+.strip-reset{font-family:var(--font-mono);font-size:9px;letter-spacing:.1em;color:var(--fg-3);background:none;border:0;cursor:pointer;padding:2px 4px;border-radius:3px}
+.strip-reset:hover{color:var(--c)}
+.strip-reset:focus-visible{outline:2px solid var(--c)}
+.strip-readout{display:flex;align-items:baseline;gap:5px;min-width:0}
+.strip-val{font-family:var(--font-mono);font-size:26px;font-weight:600;line-height:1;color:var(--c);text-shadow:0 0 12px var(--cg);font-variant-numeric:tabular-nums;white-space:nowrap}
+.strip-unit{font-family:var(--font-mono);font-size:11px;color:var(--fg-3)}
+.strip-sub{font-family:var(--font-mono);font-size:10.5px;color:var(--fg-3);min-height:1.3em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.strip-scale{display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:10px;color:var(--fg-3)}
+.fader{-webkit-appearance:none;appearance:none;width:100%;height:28px;background:transparent;margin:0;cursor:pointer;--p:50%}
+.fader:focus-visible{outline:2px solid var(--c);outline-offset:2px;border-radius:4px}
+.fader::-webkit-slider-runnable-track{height:6px;border-radius:3px;background:linear-gradient(90deg,var(--c) 0,var(--c) var(--p),#1b2434 var(--p),#1b2434 100%);box-shadow:inset 0 0 2px #000}
+.fader::-webkit-slider-thumb{-webkit-appearance:none;width:18px;height:18px;margin-top:-6px;border-radius:50%;background:#0b0f18;border:2px solid var(--c);box-shadow:0 0 10px var(--c)}
+.fader::-moz-range-track{height:6px;border-radius:3px;background:#1b2434}
+.fader::-moz-range-progress{height:6px;border-radius:3px;background:var(--c)}
+.fader::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:#0b0f18;border:2px solid var(--c);box-shadow:0 0 10px var(--c)}
+.fx-foot{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.chain{font-family:var(--font-mono);font-size:11px;color:var(--fg-3);letter-spacing:.02em;flex:1 1 260px;min-width:0;overflow-wrap:anywhere}
+.chain b{color:var(--fg-2);font-weight:500}
+.fx-foot .btn{margin-left:auto}
+
+/* AI console */
+.seg{margin-left:auto;display:inline-flex;border:1px solid var(--line-2);border-radius:4px;overflow:hidden}
+.seg-btn{font-family:var(--font-mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;padding:5px 10px;background:transparent;border:0;color:var(--fg-3);cursor:pointer}
+.seg-btn.active{background:rgba(255,46,166,.16);color:var(--magenta)}
+.seg-btn:disabled{opacity:.4;cursor:not-allowed}
+.seg-btn:focus-visible{outline:2px solid var(--magenta);outline-offset:-2px}
+.field{display:flex;flex-direction:column;gap:6px}
+.field-label{font-family:var(--font-display);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--fg-2)}
+textarea{width:100%;resize:vertical;min-height:62px;padding:10px 12px;background:var(--bg-2);border:1px solid var(--line-2);border-radius:4px;color:var(--fg);font-family:var(--font-body);font-size:14px;line-height:1.4}
+textarea:focus{outline:none;border-color:var(--magenta);box-shadow:var(--glow-m)}
+textarea::placeholder{color:var(--fg-3)}
+.field-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.hint{font-family:var(--font-mono);font-size:11px;color:var(--fg-3);flex:1 1 180px;min-width:0}
+.ai-status{font-family:var(--font-mono);font-size:12px;padding:8px 10px;border:1px solid var(--line-2);border-radius:4px;background:var(--bg-2);color:var(--fg-2);display:flex;gap:8px;align-items:center;overflow-wrap:anywhere}
+.ai-status.busy{border-color:var(--magenta);color:var(--magenta)}
+.ai-status.busy::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--magenta);flex:none;animation:pulse 1s infinite}
+.ai-status.err{border-color:var(--amber);color:var(--amber)}
+.ai-status.ok{border-color:var(--lime);color:var(--lime)}
+@keyframes pulse{0%,100%{opacity:.3}50%{opacity:1}}
+.versions{display:flex;gap:6px;flex-wrap:wrap}
+.ver{font-family:var(--font-mono);font-size:10px;letter-spacing:.06em;padding:4px 8px;border:1px solid var(--line-2);border-radius:3px;background:transparent;color:var(--fg-2);cursor:pointer;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ver.active{border-color:var(--magenta);color:var(--magenta);box-shadow:0 0 8px rgba(255,46,166,.3)}
+.ver:focus-visible{outline:2px solid var(--magenta);outline-offset:2px}
+.blueprint{display:flex;flex-direction:column;gap:12px}
+.bp-empty{padding:16px;border:1px dashed var(--line-2);border-radius:4px;color:var(--fg-3);font-size:13px;line-height:1.5}
+.bp-empty b{color:var(--fg-2);font-family:var(--font-display);letter-spacing:.04em;display:block;margin-bottom:4px}
+.bp-head{display:flex;flex-direction:column;gap:6px}
+.bp-title{font-family:var(--font-display);font-size:18px;font-weight:700;line-height:1.2;text-wrap:balance;overflow-wrap:anywhere}
+.bp-genre{font-size:12px;color:var(--fg-2)}
+.bp-src{font-family:var(--font-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--fg-3)}
+.bp-chips{display:flex;gap:8px;flex-wrap:wrap}
+.bp-chip{display:flex;flex-direction:column;padding:6px 10px;background:var(--bg-2);border:1px solid var(--line);border-radius:4px;min-width:74px}
+.bp-chip span{font-family:var(--font-mono);font-size:9px;letter-spacing:.14em;color:var(--fg-3);text-transform:uppercase}
+.bp-chip b{font-family:var(--font-mono);font-size:15px;font-weight:600;color:var(--magenta);font-variant-numeric:tabular-nums;white-space:nowrap}
+.energy{display:flex;gap:2px;align-items:flex-end;height:16px;margin-top:3px}
+.energy i{width:5px;background:#2a3348;border-radius:1px}
+.energy i.on{background:var(--magenta);box-shadow:0 0 6px rgba(255,46,166,.5)}
+.bp-sec{display:flex;flex-direction:column;gap:6px;min-width:0}
+.bp-sec h3{margin:0;font-family:var(--font-mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--fg-3)}
+.timeline-wrap{overflow-x:auto;padding-bottom:4px}
+.timeline{display:flex;gap:3px;min-width:460px}
+.tl-block{min-width:0;padding:6px;border-radius:3px;background:linear-gradient(180deg,rgba(255,46,166,.24),rgba(255,46,166,.08));border:1px solid rgba(255,46,166,.4);display:flex;flex-direction:column;gap:2px;overflow:hidden}
+.tl-block:nth-child(even){background:linear-gradient(180deg,rgba(25,240,255,.22),rgba(25,240,255,.06));border-color:rgba(25,240,255,.4)}
+.tl-block b{font-family:var(--font-display);font-size:11px;letter-spacing:.06em;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tl-block span{font-family:var(--font-mono);font-size:10px;color:var(--fg-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tl-total{font-family:var(--font-mono);font-size:11px;color:var(--fg-3)}
+.bp-list{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:4px}
+.bp-list li{display:grid;grid-template-columns:minmax(76px,120px) 1fr;gap:8px;font-size:13px;padding:6px 8px;background:var(--bg-2);border:1px solid var(--line);border-radius:3px;min-width:0}
+.bp-list li b{font-family:var(--font-mono);font-size:11px;color:var(--cyan);font-weight:500;overflow-wrap:anywhere}
+.bp-list li span{color:var(--fg-2);min-width:0;overflow-wrap:anywhere}
+.bp-notes{margin:0;padding-left:18px;color:var(--fg-2);font-size:13px;display:flex;flex-direction:column;gap:3px}
+.bp-notes li{overflow-wrap:anywhere}
+.fx-suggest{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;padding:10px;background:var(--bg-2);border:1px solid var(--line);border-radius:4px}
+.fx-suggest .kv{font-family:var(--font-mono);font-size:12px;color:var(--fg-2);white-space:nowrap}
+.fx-suggest .kv b{color:var(--fg);font-weight:600}
+.fx-suggest .why{flex-basis:100%;font-size:12px;color:var(--fg-3);overflow-wrap:anywhere}
+.fx-suggest .btn{margin-left:auto}
+.changelog li::marker{color:var(--magenta)}
+footer{font-family:var(--font-mono);font-size:11px;color:var(--fg-3);display:flex;gap:12px;flex-wrap:wrap;justify-content:space-between;padding-top:4px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<div class="booth">
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">AI</span>
+      <span class="brand-name">DJay <em>2.0</em></span>
+      <span class="brand-sub">Performance rack</span>
+    </div>
+    <div class="leds" aria-live="polite">
+      <div class="led" id="ledDeck"><i></i><span>Deck</span><b id="ledDeckTxt">Empty</b></div>
+      <div class="led" id="ledEngine"><i></i><span>Engine</span><b id="ledEngineTxt">Standby</b></div>
+      <div class="led" id="ledAi"><i></i><span>AI link</span><b id="ledAiTxt">Checking</b></div>
+    </div>
+    <div class="clock">
+      <div class="clock-cell"><span>BPM</span><b id="hdrBpm">—</b></div>
+      <div class="clock-cell"><span>Tempo</span><b id="hdrRate">1.00×</b></div>
+      <div class="clock-cell"><span>Time</span><b id="hdrTime">0:00.0 / 0:00.0</b></div>
+    </div>
+  </header>
+
+  <main class="rack">
+   <div class="col-main">
+   <div class="row-top">
+    <!-- DECK -->
+    <section class="panel deck" aria-labelledby="deckTitle">
+      <div class="panel-head"><h2 id="deckTitle">Deck A</h2><span class="chip" id="deckChip">Empty</span></div>
+      <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Load an MP3 or WAV file from your computer">
+        <input type="file" id="fileInput" accept="audio/*,.mp3,.wav,.ogg,.m4a,.aac,.flac,.aiff" hidden>
+        <svg class="dz-icon" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="24" cy="24" r="20"/><circle cx="24" cy="24" r="5"/><circle cx="24" cy="24" r="13" stroke-dasharray="3 4"/></svg>
+        <div class="dz-text"><b id="dzTitle">Drop MP3 or WAV here</b><span id="dzSub">or click to browse your computer</span></div>
+      </div>
+      <div class="track" id="trackCard" hidden>
+        <div class="track-name" id="trackName">—</div>
+        <div class="track-sub" id="trackSub">—</div>
+        <dl class="meta">
+          <div><dt>Duration</dt><dd id="mDur">—</dd></div>
+          <div><dt>Format</dt><dd id="mFmt">—</dd></div>
+          <div><dt>Sample rate</dt><dd id="mSr">—</dd></div>
+          <div><dt>Channels</dt><dd id="mCh">—</dd></div>
+          <div><dt>Bit depth / rate</dt><dd id="mBit">—</dd></div>
+          <div><dt>File size</dt><dd id="mSize">—</dd></div>
+          <div><dt>Est. BPM</dt><dd id="mBpm" class="hi">—</dd></div>
+          <div><dt>Tag BPM / key</dt><dd id="mTag">—</dd></div>
+        </dl>
+        <div class="track-actions">
+          <button id="btnEject" class="btn ghost sm" type="button">Eject</button>
+          <button id="btnDemo" class="btn ghost sm" type="button">Load synth demo loop</button>
+        </div>
+      </div>
+      <div class="track-actions" id="emptyActions">
+        <button id="btnDemo2" class="btn ghost sm" type="button">Or arm the synth demo loop</button>
+      </div>
+      <div class="deck-status" id="deckStatus">No deck armed.</div>
+    </section>
+
+    <!-- MONITOR -->
+    <section class="panel monitor" aria-labelledby="monTitle">
+      <div class="panel-head">
+        <h2 id="monTitle">Monitor</h2>
+        <span class="chip" id="monChip">Stopped</span>
+        <div class="xport-time"><b id="tCur">0:00.0</b><span>/</span><b id="tDur">0:00.0</b></div>
+      </div>
+      <canvas id="wave" class="wave" aria-label="Waveform. Click or drag to seek." role="img"></canvas>
+      <div class="transport">
+        <button id="btnCue" class="tbtn" type="button" title="Cue to start" aria-label="Cue to start"><svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg></button>
+        <button id="btnPlay" class="tbtn play" type="button" title="Play / pause (Space)" aria-label="Play" aria-pressed="false"><svg viewBox="0 0 24 24"><path id="playIcon" d="M7 4v16l13-8z"/></svg></button>
+        <button id="btnStop" class="tbtn" type="button" title="Stop" aria-label="Stop"><svg viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg></button>
+        <button id="btnLoop" class="tbtn toggle" type="button" aria-pressed="false">Loop</button>
+        <div class="vu-wrap">
+          <span class="vu-label">OUT</span>
+          <canvas id="vu" class="vu" aria-label="Output level meter" role="img"></canvas>
+          <span class="clip" id="clip">CLIP</span>
+        </div>
+      </div>
+      <canvas id="spec" class="spec" aria-label="Spectrum analyser" role="img"></canvas>
+      <div class="monitor-foot"><span>Spectrum <b>30 Hz – 18 kHz</b> log scale, post-FX</span><span id="monHint">Space = play/pause · click the waveform to seek</span></div>
+    </section>
+
+   </div>
+    <!-- FX RACK -->
+    <section class="panel fx" aria-labelledby="fxTitle">
+      <div class="panel-head"><h2 id="fxTitle">Analog FX deck</h2><span class="chip">Web Audio · live</span><span class="chip" id="fxChip">Neutral</span></div>
+      <div class="strips">
+        <div class="strip">
+          <div class="strip-head"><span class="strip-name">Tempo</span><button class="strip-reset" type="button" data-reset="tempo">RESET</button></div>
+          <div class="strip-readout"><output class="strip-val" id="vTempo" for="rTempo">1.00</output><span class="strip-unit" id="uTempo">×</span></div>
+          <div class="strip-sub" id="sTempo">pitch locked</div>
+          <input type="range" id="rTempo" class="fader" min="50" max="200" value="100" step="1" aria-label="Speed and tempo, 0.5 to 2 times, pitch preserved">
+          <div class="strip-scale"><span>0.5×</span><span>1.0×</span><span>2.0×</span></div>
+        </div>
+        <div class="strip m">
+          <div class="strip-head"><span class="strip-name">Low-pass</span><button class="strip-reset" type="button" data-reset="lpf">RESET</button></div>
+          <div class="strip-readout"><output class="strip-val" id="vLpf" for="rLpf">20.0</output><span class="strip-unit" id="uLpf">kHz</span></div>
+          <div class="strip-sub" id="sLpf">open</div>
+          <input type="range" id="rLpf" class="fader" min="0" max="1000" value="1000" step="1" aria-label="Low-pass filter cutoff, 20 hertz to 20 kilohertz">
+          <div class="strip-scale"><span>20 Hz</span><span>630 Hz</span><span>20 kHz</span></div>
+        </div>
+        <div class="strip l">
+          <div class="strip-head"><span class="strip-name">High-pass</span><button class="strip-reset" type="button" data-reset="hpf">RESET</button></div>
+          <div class="strip-readout"><output class="strip-val" id="vHpf" for="rHpf">20</output><span class="strip-unit" id="uHpf">Hz</span></div>
+          <div class="strip-sub" id="sHpf">open</div>
+          <input type="range" id="rHpf" class="fader" min="0" max="1000" value="0" step="1" aria-label="High-pass filter cutoff, 20 hertz to 20 kilohertz">
+          <div class="strip-scale"><span>20 Hz</span><span>630 Hz</span><span>20 kHz</span></div>
+        </div>
+        <div class="strip a">
+          <div class="strip-head"><span class="strip-name">Gain</span><button class="strip-reset" type="button" data-reset="gain">RESET</button></div>
+          <div class="strip-readout"><output class="strip-val" id="vGain" for="rGain">+0.0</output><span class="strip-unit" id="uGain">dB</span></div>
+          <div class="strip-sub" id="sGain">unity · ×1.00</div>
+          <input type="range" id="rGain" class="fader" min="-24" max="12" value="0" step="0.1" aria-label="Gain boost, minus 24 to plus 12 decibels">
+          <div class="strip-scale"><span>−24</span><span>0 dB</span><span>+12</span></div>
+        </div>
+      </div>
+      <div class="fx-foot">
+        <div class="chain" id="chainTxt">SRC → HPF <b>20 Hz</b> → LPF <b>20.0 kHz</b> → GAIN <b>+0.0 dB</b> → ANALYSER → OUT</div>
+        <button id="btnResetRack" class="btn ghost sm" type="button">Reset rack</button>
+      </div>
+    </section>
+
+   </div>
+    <!-- AI CONSOLE -->
+    <section class="panel ai" aria-labelledby="aiTitle">
+      <div class="panel-head">
+        <h2 id="aiTitle">AI console</h2>
+        <div class="seg" role="group" aria-label="Blueprint engine">
+          <button class="seg-btn" id="engClaude" type="button" disabled>Claude</button>
+          <button class="seg-btn active" id="engLocal" type="button">On-device</button>
+        </div>
+      </div>
+      <label class="field">
+        <span class="field-label">AI Style Blueprint Prompt</span>
+        <textarea id="promptBlueprint" rows="3" placeholder="Any genre or artist vibe in the world, e.g. “John Summit Tech House with driving sub-bassline” or “Aggressive EDM Frat Remix with massive supersaw festival chords”"></textarea>
+      </label>
+      <div class="field-row">
+        <button id="btnBlueprint" class="btn primary" type="button">Generate blueprint</button>
+        <span class="hint" id="aiHint">Checking for a Claude link…</span>
+      </div>
+      <label class="field">
+        <span class="field-label">AI Modification / Continuation Input</span>
+        <textarea id="promptMod" rows="2" placeholder="Follow-ups, e.g. “Continue this track for another 60 seconds with heavy tech house kick” or “Add a high-pass vocal filter build over 8 bars”"></textarea>
+      </label>
+      <div class="field-row">
+        <button id="btnMod" class="btn magenta" type="button" disabled>Apply modification</button>
+        <button id="btnStopAi" class="btn ghost" type="button" hidden>Stop</button>
+        <span class="hint" id="modHint">Each modification becomes a new version of the blueprint.</span>
+      </div>
+      <div class="ai-status" id="aiStatus" hidden></div>
+      <div class="versions" id="versions" aria-label="Blueprint versions"></div>
+      <div class="blueprint" id="blueprint">
+        <div class="bp-empty"><b>No blueprint yet</b>Describe a style above and generate. You get a working title, BPM and key, a bar-by-bar arrangement timeline, sound-design specs, and a suggested FX rack setting you can apply to the live deck in one click. Follow-ups in the modification field extend or tweak it as numbered versions.</div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <span>Chain: media element → high-pass → low-pass → gain → analyser → output · tempo via time-stretch, pitch locked</span>
+    <span>Audio never leaves your browser. AI prompts go to Claude only when you choose the Claude engine.</span>
+  </footer>
+</div>
+<audio id="player" preload="auto"></audio>
+<script>
+(() => {
+'use strict';
+const $ = id => document.getElementById(id);
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const fmtTime = s => { if (!isFinite(s) || s < 0) s = 0; const m = Math.floor(s / 60); const sec = s - m * 60; return m + ':' + (sec < 10 ? '0' : '') + sec.toFixed(1); };
+const fmtHz = hz => hz >= 1000 ? (hz / 1000).toFixed(hz >= 10000 ? 1 : 2) + ' kHz' : Math.round(hz) + ' Hz';
+const fmtBytes = b => b >= 1048576 ? (b / 1048576).toFixed(2) + ' MB' : (b / 1024).toFixed(0) + ' KB';
+const short = (s, n = 110) => s.length > n ? s.slice(0, n - 1) + '…' : s;
+
+const audioEl = $('player');
+audioEl.preservesPitch = true;
+try { audioEl.mozPreservesPitch = true; audioEl.webkitPreservesPitch = true; } catch (e) {}
+
+const state = {
+  loaded: false, name: '', size: 0, isDemo: false, duration: 0, peaks: null, bpm: null, meta: null,
+  url: null, loadGen: 0, waveDirty: true, loop: false,
+  claudeAvail: false, engine: 'local', aiBusy: false, ctl: null, versions: [], active: -1
+};
+const rack = { tempo: 1, lpf: 20000, hpf: 20, gain: 0 };
+const RACK_DEFAULT = { tempo: 1, lpf: 20000, hpf: 20, gain: 0 };
+
+function setLed(id, cls, txt) { const el = $(id); el.className = 'led' + (cls ? ' ' + cls : ''); $(id + 'Txt').textContent = txt; }
+function setStatus(txt, err) { const el = $('deckStatus'); el.textContent = txt; el.className = 'deck-status' + (err ? ' err' : ''); }
+function setChip(id, txt, cls) { const el = $(id); el.textContent = txt; el.className = 'chip' + (cls ? ' ' + cls : ''); }
+
+/* ---------- FX rack ---------- */
+const sliderToHz = v => 20 * Math.pow(1000, v / 1000);
+const hzToSlider = hz => Math.round(1000 * Math.log(clamp(hz, 20, 20000) / 20) / Math.log(1000));
+const faders = { tempo: $('rTempo'), lpf: $('rLpf'), hpf: $('rHpf'), gain: $('rGain') };
+
+function fillFader(input) {
+  const p = (input.value - input.min) / (input.max - input.min) * 100;
+  input.style.setProperty('--p', p.toFixed(2) + '%');
+}
+function readFaders() {
+  rack.tempo = +faders.tempo.value / 100;
+  rack.lpf = sliderToHz(+faders.lpf.value);
+  rack.hpf = sliderToHz(+faders.hpf.value);
+  rack.gain = +faders.gain.value;
+}
+function writeFaders(r) {
+  faders.tempo.value = Math.round(r.tempo * 100);
+  faders.lpf.value = hzToSlider(r.lpf);
+  faders.hpf.value = hzToSlider(r.hpf);
+  faders.gain.value = r.gain.toFixed(1);
+}
+function refreshRackUI() {
+  Object.values(faders).forEach(fillFader);
+  $('vTempo').textContent = rack.tempo.toFixed(2);
+  $('sTempo').textContent = state.bpm ? (state.bpm * rack.tempo).toFixed(1) + ' BPM effective' : 'pitch locked';
+  $('hdrRate').textContent = rack.tempo.toFixed(2) + '×';
+  const lp = rack.lpf, hp = rack.hpf;
+  $('vLpf').textContent = lp >= 1000 ? (lp / 1000).toFixed(lp >= 10000 ? 1 : 2) : String(Math.round(lp));
+  $('uLpf').textContent = lp >= 1000 ? 'kHz' : 'Hz';
+  $('sLpf').textContent = lp >= 19500 ? 'open' : lp <= 200 ? 'sub isolate · −12 dB/oct' : 'cutting above · −12 dB/oct';
+  $('vHpf').textContent = hp >= 1000 ? (hp / 1000).toFixed(hp >= 10000 ? 1 : 2) : String(Math.round(hp));
+  $('uHpf').textContent = hp >= 1000 ? 'kHz' : 'Hz';
+  $('sHpf').textContent = hp <= 22 ? 'open' : hp >= 150 ? 'vocal isolate · −12 dB/oct' : 'rolling off mud · −12 dB/oct';
+  const g = rack.gain;
+  $('vGain').textContent = (g >= 0 ? '+' : '−') + Math.abs(g).toFixed(1);
+  $('sGain').textContent = (g === 0 ? 'unity' : g > 0 ? 'boost' : 'trim') + ' · ×' + Math.pow(10, g / 20).toFixed(2);
+  $('chainTxt').innerHTML = 'SRC → HPF <b>' + fmtHz(hp) + '</b> → LPF <b>' + fmtHz(lp) + '</b> → GAIN <b>' + (g >= 0 ? '+' : '−') + Math.abs(g).toFixed(1) + ' dB</b> → ANALYSER → OUT';
+  const neutral = rack.tempo === 1 && lp >= 19500 && hp <= 22 && g === 0;
+  setChip('fxChip', neutral ? 'Neutral' : 'Active', neutral ? '' : 'busy');
+}
+function applyRackToAudio() {
+  if (!ctx) return;
+  const t = ctx.currentTime;
+  lpfNode.frequency.setTargetAtTime(rack.lpf, t, 0.03);
+  hpfNode.frequency.setTargetAtTime(rack.hpf, t, 0.03);
+  gainNode.gain.setTargetAtTime(Math.pow(10, rack.gain / 20), t, 0.03);
+}
+function onFader() { readFaders(); refreshRackUI(); applyRackToAudio(); }
+Object.values(faders).forEach(f => { f.addEventListener('input', onFader); f.addEventListener('dblclick', () => resetParam(f)); });
+function resetParam(f) {
+  const key = Object.keys(faders).find(k => faders[k] === f);
+  const r = Object.assign({}, rack, { [key]: RACK_DEFAULT[key] });
+  animateRackTo(r);
+}
+document.querySelectorAll('.strip-reset').forEach(b => b.addEventListener('click', () => resetParam(faders[b.dataset.reset])));
+$('btnResetRack').addEventListener('click', () => animateRackTo(RACK_DEFAULT));
+
+let rackAnim = null;
+function animateRackTo(target, ms = 650) {
+  const from = Object.assign({}, rack);
+  const to = { tempo: clamp(target.tempo, .5, 2), lpf: clamp(target.lpf, 20, 20000), hpf: clamp(target.hpf, 20, 20000), gain: clamp(target.gain, -24, 12) };
+  const t0 = performance.now();
+  if (rackAnim) cancelAnimationFrame(rackAnim);
+  const ease = x => 1 - Math.pow(1 - x, 3);
+  const step = now => {
+    const k = ease(clamp((now - t0) / ms, 0, 1));
+    const cur = {
+      tempo: from.tempo + (to.tempo - from.tempo) * k,
+      lpf: Math.exp(Math.log(from.lpf) + (Math.log(to.lpf) - Math.log(from.lpf)) * k),
+      hpf: Math.exp(Math.log(from.hpf) + (Math.log(to.hpf) - Math.log(from.hpf)) * k),
+      gain: from.gain + (to.gain - from.gain) * k
+    };
+    writeFaders(cur); readFaders(); refreshRackUI(); applyRackToAudio();
+    if (k < 1) rackAnim = requestAnimationFrame(step); else { rackAnim = null; writeFaders(to); Object.assign(rack, to); refreshRackUI(); applyRackToAudio(); }
+  };
+  rackAnim = requestAnimationFrame(step);
+}
+
+/* ---------- Web Audio engine ---------- */
+let ctx = null, srcNode, hpfNode, lpfNode, gainNode, analyser, timeData, freqData;
+function ensureEngine() {
+  if (ctx) return;
+  const AC = window.AudioContext || window.webkitAudioContext;
+  ctx = new AC();
+  srcNode = ctx.createMediaElementSource(audioEl);
+  hpfNode = ctx.createBiquadFilter(); hpfNode.type = 'highpass'; hpfNode.Q.value = 0.7071; hpfNode.frequency.value = rack.hpf;
+  lpfNode = ctx.createBiquadFilter(); lpfNode.type = 'lowpass'; lpfNode.Q.value = 0.7071; lpfNode.frequency.value = rack.lpf;
+  gainNode = ctx.createGain(); gainNode.gain.value = Math.pow(10, rack.gain / 20);
+  analyser = ctx.createAnalyser(); analyser.fftSize = 2048; analyser.smoothingTimeConstant = 0.82;
+  srcNode.connect(hpfNode); hpfNode.connect(lpfNode); lpfNode.connect(gainNode); gainNode.connect(analyser); analyser.connect(ctx.destination);
+  timeData = new Float32Array(analyser.fftSize);
+  freqData = new Uint8Array(analyser.frequencyBinCount);
+  setLed('ledEngine', 'on', 'Live ' + (ctx.sampleRate / 1000).toFixed(1) + ' kHz');
+}
+async function play() {
+  if (!state.loaded) { setStatus('Arm a deck first: drop a file or load the demo loop.', true); return; }
+  try {
+    ensureEngine();
+    if (ctx.state === 'suspended') await ctx.resume();
+    await audioEl.play();
+  } catch (e) { setStatus('Playback blocked: ' + (e && e.message ? e.message : e), true); }
+}
+function togglePlay() { if (audioEl.paused) play(); else audioEl.pause(); }
+$('btnPlay').addEventListener('click', togglePlay);
+$('btnStop').addEventListener('click', () => { audioEl.pause(); audioEl.currentTime = 0; state.waveDirty = true; });
+$('btnCue').addEventListener('click', () => { audioEl.currentTime = 0; state.waveDirty = true; });
+$('btnLoop').addEventListener('click', () => { state.loop = !state.loop; audioEl.loop = state.loop; $('btnLoop').classList.toggle('on', state.loop); $('btnLoop').setAttribute('aria-pressed', String(state.loop)); });
+audioEl.addEventListener('play', () => { $('btnPlay').classList.add('on'); $('btnPlay').setAttribute('aria-pressed', 'true'); $('btnPlay').setAttribute('aria-label', 'Pause'); $('playIcon').setAttribute('d', 'M6 4h4v16H6zM14 4h4v16h-4z'); setChip('monChip', 'Playing', 'armed'); });
+const onPaused = () => { $('btnPlay').classList.remove('on'); $('btnPlay').setAttribute('aria-pressed', 'false'); $('btnPlay').setAttribute('aria-label', 'Play'); $('playIcon').setAttribute('d', 'M7 4v16l13-8z'); setChip('monChip', audioEl.ended ? 'End' : 'Stopped', ''); };
+audioEl.addEventListener('pause', onPaused);
+audioEl.addEventListener('ended', onPaused);
+audioEl.addEventListener('loadedmetadata', () => { if (!state.duration && isFinite(audioEl.duration)) { state.duration = audioEl.duration; $('mDur').textContent = fmtTime(state.duration); } state.waveDirty = true; });
+audioEl.addEventListener('error', () => { if (state.name) setStatus('The browser could not play this file (' + state.name + ').', true); });
+document.addEventListener('keydown', e => {
+  if (e.code !== 'Space' || e.repeat) return;
+  const t = e.target; if (t && (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT' || t.tagName === 'BUTTON')) return;
+  e.preventDefault(); togglePlay();
+});
+
+/* waveform seek */
+const waveC = $('wave');
+let seeking = false;
+function seekAt(ev) {
+  if (!state.duration) return;
+  const r = waveC.getBoundingClientRect();
+  const frac = clamp((ev.clientX - r.left) / r.width, 0, 1);
+  audioEl.currentTime = frac * state.duration; state.waveDirty = true;
+}
+waveC.addEventListener('pointerdown', e => { seeking = true; waveC.setPointerCapture(e.pointerId); seekAt(e); });
+waveC.addEventListener('pointermove', e => { if (seeking) seekAt(e); });
+waveC.addEventListener('pointerup', () => { seeking = false; });
+waveC.addEventListener('pointercancel', () => { seeking = false; });
+
+/* ---------- drawing ---------- */
+function sizeCanvas(c) {
+  const dpr = window.devicePixelRatio || 1, w = c.clientWidth, h = c.clientHeight;
+  if (!w || !h) return null;
+  const W = Math.round(w * dpr), H = Math.round(h * dpr);
+  if (c.width !== W || c.height !== H) { c.width = W; c.height = H; state.waveDirty = true; }
+  const g = c.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); return { g, w, h };
+}
+function drawWave() {
+  const s = sizeCanvas(waveC); if (!s) return; const { g, w, h } = s; const mid = h / 2;
+  g.fillStyle = '#0b0f18'; g.fillRect(0, 0, w, h);
+  g.strokeStyle = '#1d2738'; g.beginPath(); g.moveTo(0, mid + .5); g.lineTo(w, mid + .5); g.stroke();
+  const peaks = state.peaks;
+  if (!peaks) {
+    g.fillStyle = '#6b778f'; g.font = '11px JetBrains Mono, monospace'; g.textAlign = 'center';
+    g.fillText(state.loaded ? 'NO WAVEFORM FOR THIS FILE · PLAYBACK STILL WORKS' : 'NO DECK ARMED · DROP AN MP3 OR WAV', w / 2, mid + 4);
+    return;
+  }
+  const n = peaks.length, dur = state.duration || 1;
+  const frac = clamp((audioEl.currentTime || 0) / dur, 0, 1), px = frac * w;
+  if (state.bpm) {
+    const barSec = 240 / state.bpm, every = barSec * 4;
+    g.strokeStyle = 'rgba(255,255,255,.06)';
+    for (let t = every; t < dur; t += every) { const x = Math.round(t / dur * w) + .5; g.beginPath(); g.moveTo(x, 0); g.lineTo(x, h); g.stroke(); }
+  }
+  for (let x = 0; x < w; x++) {
+    const i = Math.min(n - 1, Math.floor(x / w * n));
+    const bh = Math.max(1, peaks[i] * h * 0.92);
+    g.fillStyle = x < px ? '#19f0ff' : '#2a5f6b';
+    g.fillRect(x, mid - bh / 2, 1, bh);
+  }
+  g.fillStyle = 'rgba(255,46,166,.25)'; g.fillRect(px - 3, 0, 6, h);
+  g.fillStyle = '#ff2ea6'; g.fillRect(px - 1, 0, 2, h);
+}
+const BANDS = 56; const bandPeaks = new Float32Array(BANDS); let specGrad = null, specGradH = 0;
+function drawSpec() {
+  const c = $('spec'); const s = sizeCanvas(c); if (!s) return; const { g, w, h } = s;
+  g.fillStyle = '#0b0f18'; g.fillRect(0, 0, w, h);
+  if (specGradH !== h) { specGrad = g.createLinearGradient(0, h, 0, 0); specGrad.addColorStop(0, '#19f0ff'); specGrad.addColorStop(.55, '#19f0ff'); specGrad.addColorStop(1, '#ff2ea6'); specGradH = h; }
+  const live = analyser && !audioEl.paused;
+  if (live) analyser.getByteFrequencyData(freqData);
+  const nyq = ctx ? ctx.sampleRate / 2 : 22050, bins = freqData ? freqData.length : 1024;
+  const fmin = 30, fmax = Math.min(18000, nyq), bw = w / BANDS;
+  for (let b = 0; b < BANDS; b++) {
+    let v = 0;
+    if (live) {
+      const f0 = fmin * Math.pow(fmax / fmin, b / BANDS), f1 = fmin * Math.pow(fmax / fmin, (b + 1) / BANDS);
+      const i0 = Math.floor(f0 / nyq * bins), i1 = Math.max(i0 + 1, Math.floor(f1 / nyq * bins));
+      let m = 0; for (let i = i0; i < i1 && i < bins; i++) if (freqData[i] > m) m = freqData[i];
+      v = m / 255;
+    }
+    bandPeaks[b] = Math.max(v, bandPeaks[b] - 0.014);
+    const bh = v * (h - 6);
+    g.fillStyle = specGrad; g.fillRect(b * bw + 1, h - bh, bw - 2, bh);
+    const ph = bandPeaks[b] * (h - 6);
+    g.fillStyle = ph > 0.5 ? 'rgba(232,237,247,.8)' : 'rgba(43,56,80,.9)'; g.fillRect(b * bw + 1, h - ph - 2, bw - 2, 2);
+  }
+}
+let vuRms = 0, peakHold = 0, holdUntil = 0, clipUntil = 0;
+function drawVu(now) {
+  const c = $('vu'); const s = sizeCanvas(c); if (!s) return; const { g, w, h } = s;
+  if (analyser && !audioEl.paused) {
+    analyser.getFloatTimeDomainData(timeData);
+    let sum = 0, pk = 0;
+    for (let i = 0; i < timeData.length; i++) { const v = timeData[i]; sum += v * v; const a = v < 0 ? -v : v; if (a > pk) pk = a; }
+    const rms = Math.sqrt(sum / timeData.length);
+    vuRms = Math.max(rms, vuRms * 0.86);
+    if (pk >= peakHold) { peakHold = pk; holdUntil = now + 900; } else if (now > holdUntil) peakHold *= 0.94;
+    if (pk > 0.985) clipUntil = now + 1200;
+  } else { vuRms *= 0.86; peakHold *= 0.94; }
+  $('clip').classList.toggle('on', now < clipUntil);
+  g.fillStyle = '#0b0f18'; g.fillRect(0, 0, w, h);
+  const SEG = 28, gap = 2, sw = (w - gap * (SEG - 1)) / SEG;
+  const toDb = v => v > 0 ? 20 * Math.log10(v) : -99;
+  const rmsDb = toDb(vuRms), pkDb = toDb(peakHold);
+  for (let i = 0; i < SEG; i++) {
+    const segDb = -48 + i * (54 / SEG);
+    const col = segDb >= -3 ? '#ff3b5c' : segDb >= -12 ? '#ffb020' : '#b6ff3b';
+    const on = rmsDb >= segDb;
+    g.fillStyle = on ? col : '#1b2434'; g.globalAlpha = on ? 1 : .8;
+    g.fillRect(i * (sw + gap), 2, sw, h - 4);
+  }
+  g.globalAlpha = 1;
+  if (pkDb > -48) { const i = clamp(Math.floor((pkDb + 48) / (54 / SEG)), 0, SEG - 1); g.fillStyle = '#e8edf7'; g.fillRect(i * (sw + gap), 0, sw, h); }
+}
+let frame = 0;
+function tick(now) {
+  frame++;
+  const pr = audioEl.playbackRate;
+  if (Math.abs(pr - rack.tempo) > 0.0015) audioEl.playbackRate = pr + (rack.tempo - pr) * 0.25;
+  else if (pr !== rack.tempo) audioEl.playbackRate = rack.tempo;
+  if (frame % 3 === 0) {
+    const cur = audioEl.currentTime || 0, dur = state.duration || 0;
+    $('tCur').textContent = fmtTime(cur); $('tDur').textContent = fmtTime(dur);
+    $('hdrTime').textContent = fmtTime(cur) + ' / ' + fmtTime(dur);
+  }
+  if (!audioEl.paused || state.waveDirty || seeking) { drawWave(); state.waveDirty = false; }
+  drawSpec(); drawVu(now);
+  requestAnimationFrame(tick);
+}
+new ResizeObserver(() => { state.waveDirty = true; }).observe($('wave'));
+
+/* ---------- file metadata ---------- */
+function parseContainer(buf, name) {
+  const dv = new DataView(buf), u8 = new Uint8Array(buf);
+  const out = { format: ((name.split('.').pop() || '').toUpperCase() || 'AUDIO'), tags: {} };
+  const ascii = (o, n) => { let s = ''; for (let i = 0; i < n && o + i < u8.length; i++) s += String.fromCharCode(u8[o + i]); return s; };
+  const dec = (enc, o, n) => { try { return new TextDecoder(enc).decode(u8.subarray(o, o + n)).replace(/\0+$/g, '').replace(/^﻿/, '').trim(); } catch (e) { return ascii(o, n).replace(/\0+$/g, '').trim(); } };
+  const syncsafe = o => ((u8[o] & 0x7f) << 21) | ((u8[o + 1] & 0x7f) << 14) | ((u8[o + 2] & 0x7f) << 7) | (u8[o + 3] & 0x7f);
+  if (u8.length > 12 && ascii(0, 4) === 'RIFF' && ascii(8, 4) === 'WAVE') {
+    out.format = 'WAV'; let p = 12;
+    while (p + 8 <= u8.length) {
+      const id = ascii(p, 4), sz = dv.getUint32(p + 4, true), body = p + 8;
+      if (id === 'fmt ' && body + 16 <= u8.length) {
+        const tag = dv.getUint16(body, true);
+        out.channels = dv.getUint16(body + 2, true); out.sampleRate = dv.getUint32(body + 4, true); out.bitDepth = dv.getUint16(body + 14, true);
+        out.encoding = tag === 1 ? 'PCM' : tag === 3 ? 'Float' : tag === 0xFFFE ? 'Extensible' : 'Format ' + tag;
+      } else if (id === 'LIST' && ascii(body, 4) === 'INFO') {
+        let q = body + 4; const end = Math.min(body + sz, u8.length);
+        while (q + 8 <= end) { const sid = ascii(q, 4), ssz = dv.getUint32(q + 4, true); const txt = dec('iso-8859-1', q + 8, Math.min(ssz, end - q - 8)); if (sid === 'INAM') out.tags.title = txt; if (sid === 'IART') out.tags.artist = txt; if (sid === 'IPRD') out.tags.album = txt; q += 8 + ssz + (ssz & 1); }
+      }
+      p = body + sz + (sz & 1);
+    }
+    return out;
+  }
+  let off = 0;
+  if (ascii(0, 3) === 'ID3') {
+    const ver = u8[3], flags = u8[5], size = syncsafe(6), end = Math.min(10 + size, u8.length); off = end;
+    let p = 10;
+    if (flags & 0x40) { const eh = ver === 4 ? syncsafe(10) : dv.getUint32(10); p += ver === 4 ? eh : eh + 4; }
+    if (ver >= 3) while (p + 10 <= end) {
+      const id = ascii(p, 4); if (!/^[A-Z0-9]{4}$/.test(id)) break;
+      const fs = ver === 4 ? syncsafe(p + 4) : dv.getUint32(p + 4); p += 10;
+      if (fs <= 0 || p + fs > end) break;
+      if (id[0] === 'T' && id !== 'TXXX') { const enc = u8[p]; const e = enc === 0 ? 'iso-8859-1' : enc === 1 ? 'utf-16' : enc === 2 ? 'utf-16be' : 'utf-8'; out.tags[id] = dec(e, p + 1, fs - 1); }
+      p += fs;
+    }
+    const t = out.tags;
+    out.tags = { title: t.TIT2, artist: t.TPE1, album: t.TALB, bpm: t.TBPM, key: t.TKEY, genre: t.TCON, year: t.TDRC || t.TYER };
+  }
+  if (u8.length > 128 && ascii(u8.length - 128, 3) === 'TAG') {
+    const b = u8.length - 128;
+    out.tags.title = out.tags.title || dec('iso-8859-1', b + 3, 30); out.tags.artist = out.tags.artist || dec('iso-8859-1', b + 33, 30); out.tags.album = out.tags.album || dec('iso-8859-1', b + 63, 30);
+  }
+  const lim = Math.min(u8.length - 4, off + 262144);
+  for (let i = off; i < lim; i++) {
+    if (u8[i] !== 0xFF || (u8[i + 1] & 0xE0) !== 0xE0) continue;
+    const b1 = u8[i + 1], b2 = u8[i + 2], b3 = u8[i + 3];
+    const verBits = (b1 >> 3) & 3, layerBits = (b1 >> 1) & 3, brIdx = b2 >> 4, srIdx = (b2 >> 2) & 3, mode = b3 >> 6;
+    if (verBits === 1 || layerBits === 0 || brIdx === 0 || brIdx === 15 || srIdx === 3) continue;
+    const srTable = verBits === 3 ? [44100, 48000, 32000] : verBits === 2 ? [22050, 24000, 16000] : [11025, 12000, 8000];
+    out.sampleRate = srTable[srIdx]; out.channels = mode === 3 ? 1 : 2;
+    out.format = 'MP3'; out.layer = ['', 'III', 'II', 'I'][layerBits]; out.mpeg = verBits === 3 ? '1' : verBits === 2 ? '2' : '2.5';
+    const look = ascii(i + 4, Math.min(200, u8.length - i - 4));
+    out.vbr = /Xing/.test(look) ? 'VBR' : /Info/.test(look) ? 'CBR' : null;
+    break;
+  }
+  return out;
+}
+
+/* ---------- analysis ---------- */
+function computePeaks(buffer, N) {
+  const len = buffer.length, ch = buffer.numberOfChannels, out = new Float32Array(N);
+  const chans = []; for (let c = 0; c < ch; c++) chans.push(buffer.getChannelData(c));
+  let max = 0;
+  for (let i = 0; i < N; i++) {
+    const a = Math.floor(i * len / N), b = Math.max(a + 1, Math.floor((i + 1) * len / N));
+    const stride = Math.max(1, Math.floor((b - a) / 600)); let m = 0;
+    for (let s = a; s < b; s += stride) { let v = 0; for (let c = 0; c < ch; c++) v += chans[c][s]; v = v < 0 ? -v : v; if (v > m) m = v; }
+    m /= ch; out[i] = m; if (m > max) max = m;
+  }
+  if (max > 0) for (let i = 0; i < N; i++) out[i] /= max;
+  return out;
+}
+function estimateBpm(buffer) {
+  const sr = buffer.sampleRate, ch = buffer.numberOfChannels, len = buffer.length;
+  const span = Math.min(len, Math.floor(sr * 120));
+  const start = len > span ? Math.floor((len - span) * 0.25) : 0;
+  const hop = 512, frames = Math.floor(span / hop);
+  if (frames < 180) return null;
+  const chans = []; for (let c = 0; c < ch; c++) chans.push(buffer.getChannelData(c));
+  const env = new Float32Array(frames);
+  for (let f = 0; f < frames; f++) {
+    const base = start + f * hop; let s = 0;
+    for (let i = 0; i < hop; i += 2) { let v = 0; for (let c = 0; c < ch; c++) v += chans[c][base + i]; s += v * v; }
+    env[f] = Math.sqrt(s / (hop / 2)) / ch;
+  }
+  const onset = new Float32Array(frames);
+  for (let f = 1; f < frames; f++) onset[f] = Math.max(0, env[f] - env[f - 1]);
+  const fr = sr / hop, minL = Math.floor(60 * fr / 200), maxL = Math.ceil(60 * fr / 60);
+  const ac = new Float32Array(maxL * 2 + 2);
+  for (let L = minL; L <= Math.min(maxL * 2, frames - 1); L++) { let s = 0; for (let f = 0; f < frames - L; f++) s += onset[f] * onset[f + L]; ac[L] = s / (frames - L); }
+  let best = -1, bestL = 0;
+  for (let L = minL; L <= maxL; L++) {
+    const bpm = 60 * fr / L;
+    let sc = ac[L] + 0.5 * ac[2 * L] + (L % 2 === 0 && L / 2 >= minL ? 0.25 * ac[L / 2] : 0);
+    sc *= bpm < 80 ? 0.72 : bpm > 170 ? 0.78 : (bpm < 95 || bpm > 155) ? 0.9 : 1;
+    if (sc > best) { best = sc; bestL = L; }
+  }
+  if (!bestL || best <= 0) return null;
+  let L = bestL;
+  if (L > minL && L < maxL) { const a = ac[L - 1], b = ac[L], c = ac[L + 1]; const den = a - 2 * b + c; if (den !== 0) { const d = (a - c) / (2 * den); if (Math.abs(d) < 1) L += d; } }
+  return 60 * fr / L;
+}
+
+/* ---------- loading ---------- */
+function renderMeta(info, decoded) {
+  const t = info.tags || {};
+  $('trackName').textContent = state.name;
+  const who = [t.artist, t.title].filter(Boolean).join(' — ');
+  $('trackSub').textContent = state.isDemo ? 'Synthesised in-browser: kick, offbeat sub, 16th hats, claps, saw stabs · 126 BPM · E minor' : who ? 'Tags: ' + who + (t.album ? ' · ' + t.album : '') : 'No embedded title or artist tags';
+  $('mDur').textContent = fmtTime(state.duration);
+  const sr = info.sampleRate || (decoded && decoded.sampleRate);
+  const ch = info.channels || (decoded && decoded.numberOfChannels);
+  $('mFmt').textContent = info.format + (info.layer ? ' · MPEG-' + info.mpeg + ' L' + info.layer : '') + (info.encoding ? ' · ' + info.encoding : '');
+  $('mSr').textContent = sr ? sr.toLocaleString() + ' Hz' : '—';
+  $('mCh').textContent = ch === 1 ? 'Mono' : ch === 2 ? 'Stereo' : ch ? ch + ' ch' : '—';
+  if (info.bitDepth) $('mBit').textContent = info.bitDepth + '-bit';
+  else if (state.duration) $('mBit').textContent = '~' + Math.round(state.size * 8 / state.duration / 1000) + ' kbps' + (info.vbr ? ' ' + info.vbr : '');
+  else $('mBit').textContent = '—';
+  $('mSize').textContent = fmtBytes(state.size);
+  $('mBpm').textContent = state.bpm ? state.bpm.toFixed(1) + ' est.' : '—';
+  $('hdrBpm').textContent = state.bpm ? state.bpm.toFixed(1) : '—';
+  $('mTag').textContent = (t.bpm || '—') + ' / ' + (t.key || '—');
+}
+async function loadBlob(blob, name, opts = {}) {
+  const gen = ++state.loadGen;
+  audioEl.pause();
+  Object.assign(state, { loaded: false, name, size: blob.size, isDemo: !!opts.demo, duration: 0, peaks: null, bpm: null, meta: null, waveDirty: true });
+  $('trackCard').hidden = false; $('emptyActions').hidden = true; $('dropzone').classList.add('compact');
+  $('dzTitle').textContent = 'Drop another MP3 or WAV to replace'; $('dzSub').textContent = 'or click to browse';
+  $('trackName').textContent = name; $('trackSub').textContent = fmtBytes(blob.size);
+  ['mDur', 'mFmt', 'mSr', 'mCh', 'mBit', 'mSize', 'mBpm', 'mTag'].forEach(id => $(id).textContent = '…');
+  $('hdrBpm').textContent = '—';
+  setChip('deckChip', 'Loading', 'busy'); setLed('ledDeck', 'warn', 'Loading'); setStatus('Reading ' + name + '…');
+  if (state.url) URL.revokeObjectURL(state.url);
+  state.url = URL.createObjectURL(blob); audioEl.src = state.url; audioEl.load();
+  let info = { format: 'AUDIO', tags: {} }, decoded = null;
+  try {
+    const buf = await blob.arrayBuffer(); if (gen !== state.loadGen) return;
+    try { info = parseContainer(buf, name); } catch (e) {}
+    setStatus('Decoding audio…');
+    const off = new OfflineAudioContext(1, 1, 44100);
+    decoded = await off.decodeAudioData(buf); if (gen !== state.loadGen) return;
+    state.duration = decoded.duration;
+    state.peaks = computePeaks(decoded, 2000);
+    setStatus('Analysing tempo…'); state.waveDirty = true;
+    await new Promise(r => setTimeout(r, 20)); if (gen !== state.loadGen) return;
+    state.bpm = estimateBpm(decoded);
+    state.loaded = true; state.meta = info; renderMeta(info, decoded);
+    setChip('deckChip', opts.demo ? 'Demo armed' : 'Armed', opts.demo ? 'demo' : 'armed'); setLed('ledDeck', 'on', 'Armed');
+    setStatus((opts.demo ? 'Demo loop armed. ' : 'Deck armed. ') + 'Press play, then ride the FX rack.');
+  } catch (e) {
+    if (gen !== state.loadGen) return;
+    state.loaded = true; state.meta = info; state.duration = isFinite(audioEl.duration) ? audioEl.duration : 0; renderMeta(info, null);
+    setChip('deckChip', 'Armed · no analysis', 'demo'); setLed('ledDeck', 'warn', 'Partial');
+    setStatus('Could not decode for analysis (' + (e && e.message ? e.message : 'unsupported codec') + '). Playback may still work.', true);
+  }
+  state.waveDirty = true; refreshRackUI();
+}
+function eject() {
+  state.loadGen++; audioEl.pause(); audioEl.removeAttribute('src'); audioEl.load();
+  if (state.url) URL.revokeObjectURL(state.url); state.url = null;
+  Object.assign(state, { loaded: false, name: '', size: 0, isDemo: false, duration: 0, peaks: null, bpm: null, meta: null, waveDirty: true });
+  $('trackCard').hidden = true; $('emptyActions').hidden = false; $('dropzone').classList.remove('compact');
+  $('dzTitle').textContent = 'Drop MP3 or WAV here'; $('dzSub').textContent = 'or click to browse your computer';
+  $('hdrBpm').textContent = '—'; setChip('deckChip', 'Empty', ''); setLed('ledDeck', '', 'Empty'); setStatus('Deck ejected.'); refreshRackUI();
+}
+const AUDIO_EXT = /\.(mp3|wav|wave|ogg|oga|m4a|aac|flac|aif|aiff|webm|opus)$/i;
+function acceptFile(file) {
+  if (!file) return;
+  if (!(file.type && file.type.startsWith('audio/')) && !AUDIO_EXT.test(file.name)) { setStatus('"' + file.name + '" is not an audio file. Drop an MP3 or WAV.', true); return; }
+  loadBlob(file, file.name);
+}
+const dz = $('dropzone'), fileInput = $('fileInput');
+dz.addEventListener('click', () => fileInput.click());
+dz.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); } });
+fileInput.addEventListener('change', () => { acceptFile(fileInput.files[0]); fileInput.value = ''; });
+['dragenter', 'dragover'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add('over'); }));
+['dragleave', 'drop'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.remove('over'); }));
+dz.addEventListener('drop', e => acceptFile(e.dataTransfer.files && e.dataTransfer.files[0]));
+document.addEventListener('dragover', e => e.preventDefault());
+document.addEventListener('drop', e => { e.preventDefault(); if (e.target.closest && e.target.closest('#dropzone')) return; acceptFile(e.dataTransfer.files && e.dataTransfer.files[0]); });
+$('btnEject').addEventListener('click', eject);
+
+/* ---------- synth demo loop ---------- */
+function encodeWav(buf) {
+  const ch = buf.numberOfChannels, sr = buf.sampleRate, n = buf.length, bytes = 44 + n * ch * 2;
+  const ab = new ArrayBuffer(bytes), dv = new DataView(ab);
+  const w = (o, s) => { for (let i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i)); };
+  w(0, 'RIFF'); dv.setUint32(4, bytes - 8, true); w(8, 'WAVE'); w(12, 'fmt '); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true);
+  dv.setUint16(22, ch, true); dv.setUint32(24, sr, true); dv.setUint32(28, sr * ch * 2, true); dv.setUint16(32, ch * 2, true); dv.setUint16(34, 16, true);
+  w(36, 'data'); dv.setUint32(40, n * ch * 2, true);
+  const chans = []; for (let c = 0; c < ch; c++) chans.push(buf.getChannelData(c));
+  let o = 44;
+  for (let i = 0; i < n; i++) for (let c = 0; c < ch; c++) { const v = clamp(chans[c][i], -1, 1); dv.setInt16(o, v < 0 ? v * 32768 : v * 32767, true); o += 2; }
+  return new Blob([ab], { type: 'audio/wav' });
+}
+async function renderDemoLoop() {
+  const sr = 44100, bpm = 126, bars = 8, beat = 60 / bpm, step = beat / 4, total = bars * 4 * beat;
+  const oc = new OfflineAudioContext(2, Math.ceil((total + 0.5) * sr), sr);
+  const bus = oc.createGain(); bus.gain.value = 0.9;
+  const comp = oc.createDynamicsCompressor(); comp.threshold.value = -10; comp.knee.value = 6; comp.ratio.value = 3; comp.attack.value = 0.004; comp.release.value = 0.12;
+  bus.connect(comp); comp.connect(oc.destination);
+  const noise = oc.createBuffer(1, sr, sr); { const d = noise.getChannelData(0); for (let i = 0; i < sr; i++) d[i] = Math.random() * 2 - 1; }
+  const hit = (node, t, peak, decay) => { const g = oc.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(peak, t + 0.003); g.gain.exponentialRampToValueAtTime(0.0001, t + decay); node.connect(g); g.connect(bus); return g; };
+  const kick = t => { const o = oc.createOscillator(); o.type = 'sine'; o.frequency.setValueAtTime(170, t); o.frequency.exponentialRampToValueAtTime(46, t + 0.1); hit(o, t, 1.0, 0.42); o.start(t); o.stop(t + 0.45); };
+  const sub = (t, f, len) => { const o = oc.createOscillator(); o.type = 'triangle'; o.frequency.value = f; const lp = oc.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 190; o.connect(lp); hit(lp, t, 0.6, len); o.start(t); o.stop(t + len + 0.05); };
+  const hat = (t, open) => { const s = oc.createBufferSource(); s.buffer = noise; s.loop = true; const hp = oc.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 7500; s.connect(hp); hit(hp, t, open ? 0.26 : 0.2, open ? 0.3 : 0.055); s.start(t); s.stop(t + 0.36); };
+  const clap = t => { for (let k = 0; k < 3; k++) { const s = oc.createBufferSource(); s.buffer = noise; s.loop = true; const bp = oc.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1700; bp.Q.value = 1.2; s.connect(bp); const tt = t + k * 0.011; hit(bp, tt, 0.42, k === 2 ? 0.2 : 0.03); s.start(tt); s.stop(tt + 0.25); } };
+  const stab = (t, notes) => { const lp = oc.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.setValueAtTime(2600, t); lp.frequency.exponentialRampToValueAtTime(500, t + 0.18); hit(lp, t, 0.12, 0.2); notes.forEach(f => [-9, 0, 9].forEach(c => { const o = oc.createOscillator(); o.type = 'sawtooth'; o.frequency.value = f; o.detune.value = c; o.connect(lp); o.start(t); o.stop(t + 0.25); })); };
+  const E1 = 41.2, G1 = 49.0, D1 = 36.71, A1 = 55.0, Em = [164.81, 196.0, 246.94], C = [130.81, 164.81, 196.0];
+  for (let b = 0; b < bars; b++) {
+    const bassNotes = b < 6 ? [E1, E1, G1, E1] : [D1, D1, A1, G1], chord = b % 4 === 3 ? C : Em;
+    for (let s = 0; s < 16; s++) {
+      const t = b * 4 * beat + s * step;
+      if (s % 4 === 0) kick(t);
+      if (s % 4 === 2) sub(t, bassNotes[s >> 2], 0.22);
+      if (s % 2 === 1) hat(t, s === 15 && b % 2 === 1);
+      if (s === 4 || s === 12) clap(t);
+      if (s === 3 || s === 10) stab(t, chord);
+    }
+  }
+  const buf = await oc.startRendering();
+  return encodeWav(buf);
+}
+async function loadDemo() {
+  setStatus('Rendering the synth demo loop…');
+  try { const blob = await renderDemoLoop(); await loadBlob(blob, 'Demo_TechHouse_126bpm_Emin.wav', { demo: true }); }
+  catch (e) { setStatus('Could not render the demo loop: ' + (e && e.message ? e.message : e), true); }
+}
+$('btnDemo').addEventListener('click', loadDemo);
+$('btnDemo2').addEventListener('click', loadDemo);
+
+/* ---------- AI console: engines ---------- */
+let sampleFn = null;
+function setEngine(which) {
+  state.engine = which;
+  $('engClaude').classList.toggle('active', which === 'claude');
+  $('engLocal').classList.toggle('active', which === 'local');
+  $('aiHint').textContent = which === 'claude'
+    ? 'Claude drafts the blueprint on your account. The first call asks for permission; thinking can take 10–60 s.'
+    : 'On-device engine: parses your prompt into a blueprint instantly, nothing leaves the page.';
+}
+function aiOffline(reason) {
+  state.claudeAvail = false; sampleFn = null; $('engClaude').disabled = true; setEngine('local');
+  setLed('ledAi', 'warn', reason || 'On-device');
+}
+async function initAi() {
+  if (!(window.claude && typeof window.claude.use === 'function')) { aiOffline('On-device'); return; }
+  try {
+    const s = await window.claude.use('sample');
+    if (s) { sampleFn = s; state.claudeAvail = true; $('engClaude').disabled = false; setEngine('claude'); setLed('ledAi', 'hot', 'Ready'); }
+    else aiOffline('On-device');
+  } catch (e) { aiOffline('On-device'); }
+}
+$('engClaude').addEventListener('click', () => { if (state.claudeAvail) setEngine('claude'); });
+$('engLocal').addEventListener('click', () => setEngine('local'));
+
+function aiStatus(txt, cls) { const el = $('aiStatus'); el.hidden = !txt; el.textContent = txt || ''; el.className = 'ai-status' + (cls ? ' ' + cls : ''); }
+function setAiBusy(b) {
+  state.aiBusy = b; $('btnBlueprint').disabled = b; $('btnMod').disabled = b || state.versions.length === 0;
+  $('btnStopAi').hidden = !(b && state.engine === 'claude');
+  if (b) setLed('ledAi', 'busy', 'Thinking'); else if (state.claudeAvail) setLed('ledAi', 'hot', 'Ready'); else setLed('ledAi', 'warn', 'On-device');
+}
+$('btnStopAi').addEventListener('click', () => { if (state.ctl) state.ctl.abort(); });
+
+function deckContext() {
+  if (!state.loaded) return 'DECK: empty (no file loaded).';
+  const m = state.meta || {}, t = m.tags || {};
+  return 'DECK: "' + state.name + '", ' + fmtTime(state.duration) + ' long, est. ' + (state.bpm ? state.bpm.toFixed(1) + ' BPM' : 'unknown BPM') +
+    (m.sampleRate ? ', ' + m.sampleRate + ' Hz' : '') + (m.channels ? ', ' + (m.channels === 1 ? 'mono' : 'stereo') : '') +
+    (t.title || t.artist ? ', tags: ' + [t.artist, t.title].filter(Boolean).join(' — ') : '') + (t.key ? ', tagged key ' + t.key : '') + (t.bpm ? ', tagged BPM ' + t.bpm : '') + '.';
+}
+function rackContext() { return 'CURRENT FX RACK: tempo ' + rack.tempo.toFixed(2) + 'x, low-pass ' + Math.round(rack.lpf) + ' Hz, high-pass ' + Math.round(rack.hpf) + ' Hz, gain ' + rack.gain.toFixed(1) + ' dB.'; }
+const SHAPE = '{"title": string, "genre": string, "bpm": integer, "key": string like "F minor", "energy": integer 1-10, ' +
+  '"arrangement": [{"section": string, "bars": integer, "notes": string}], "sound_design": [{"element": string, "spec": string}], ' +
+  '"fx_rack": {"tempo": number, "lowpass_hz": number, "highpass_hz": number, "gain_db": number, "why": string}, "mix_notes": [string], "changelog": [string]}';
+const RULES = 'Rules: 5-9 arrangement sections whose bars sum to 96-192, each notes under 25 words; 4-7 sound_design elements with concrete synthesis and processing specs (waveforms, Hz, ms, dB, swing); ' +
+  'fx_rack is a live setting for the loaded deck: tempo 0.5-2.0 (target BPM divided by the deck BPM when a deck BPM is known, else 1.0), lowpass_hz and highpass_hz 20-20000 (20000 and 20 mean fully open; only move them when the style calls for it), gain_db -24 to 12; ' +
+  '3-5 mix_notes under 20 words each; title under 8 words; plain text strings, no markdown.';
+function buildPrompt(req) {
+  const head = 'You are the production brain inside AI DJay 2.0, a browser DJ dashboard with a loaded deck and a live FX rack.\n' + deckContext() + '\n' + rackContext() + '\n';
+  if (req.kind === 'blueprint') {
+    return head + 'STYLE PROMPT: """' + req.prompt + '"""\n\nWrite a production blueprint for this style. Reply with ONLY one JSON object, no prose, exactly this shape:\n' + SHAPE + '\n' + RULES + ' changelog is [] for a fresh blueprint.';
+  }
+  return head + 'PREVIOUS BLUEPRINT (JSON): ' + JSON.stringify(req.prev) + '\nMODIFICATION REQUEST: """' + req.prompt + '"""\n\n' +
+    'Apply the request and return the COMPLETE updated blueprint as ONLY one JSON object in the same shape:\n' + SHAPE + '\n' +
+    'Keep everything the request does not touch. When asked to continue or extend by N seconds, append sections whose bars are about N / (240 / bpm), placed before the outro if there is one. ' +
+    'Fill changelog with 2-6 short entries saying exactly what changed. ' + RULES;
+}
+function normalizeBlueprint(raw) {
+  if (Array.isArray(raw)) raw = raw[0];
+  if (!raw || typeof raw !== 'object') throw { code: 'invalid_json', message: 'not an object' };
+  const str = (v, n = 160) => v == null ? '' : String(v).slice(0, n);
+  const num = (v, a, b, d) => { const x = Number(v); return isFinite(x) ? clamp(x, a, b) : d; };
+  const bp = { title: str(raw.title, 80) || 'Untitled blueprint', genre: str(raw.genre, 80), bpm: Math.round(num(raw.bpm, 40, 220, 124)), key: str(raw.key, 24) || '—', energy: Math.round(num(raw.energy, 1, 10, 7)), arrangement: [], sound_design: [], fx_rack: {}, mix_notes: [], changelog: [] };
+  (Array.isArray(raw.arrangement) ? raw.arrangement : []).slice(0, 16).forEach(s => { if (s && typeof s === 'object') bp.arrangement.push({ section: str(s.section || s.name, 40) || 'Section', bars: Math.round(num(s.bars, 1, 256, 16)), notes: str(s.notes || s.description, 220) }); });
+  if (!bp.arrangement.length) bp.arrangement = [{ section: 'Intro', bars: 16, notes: '' }, { section: 'Drop', bars: 32, notes: '' }, { section: 'Outro', bars: 16, notes: '' }];
+  (Array.isArray(raw.sound_design) ? raw.sound_design : []).slice(0, 10).forEach(s => {
+    if (typeof s === 'string') { const i = s.indexOf(':'); bp.sound_design.push({ element: str(i > 0 ? s.slice(0, i) : 'Element', 40), spec: str(i > 0 ? s.slice(i + 1).trim() : s, 220) }); }
+    else if (s && typeof s === 'object') bp.sound_design.push({ element: str(s.element || s.name, 40) || 'Element', spec: str(s.spec || s.description || s.notes, 220) });
+  });
+  const fx = raw.fx_rack && typeof raw.fx_rack === 'object' ? raw.fx_rack : {};
+  bp.fx_rack = { tempo: num(fx.tempo, .5, 2, 1), lowpass_hz: num(fx.lowpass_hz, 20, 20000, 20000), highpass_hz: num(fx.highpass_hz, 20, 20000, 20), gain_db: num(fx.gain_db, -24, 12, 0), why: str(fx.why || fx.rationale, 220) };
+  bp.mix_notes = (Array.isArray(raw.mix_notes) ? raw.mix_notes : []).slice(0, 8).map(x => str(x, 200)).filter(Boolean);
+  bp.changelog = (Array.isArray(raw.changelog) ? raw.changelog : []).slice(0, 10).map(x => str(x, 200)).filter(Boolean);
+  return bp;
+}
+
+/* ---------- on-device engine ---------- */
+const G = (re, name, bpm, energy, keys, arr, sd, notes) => ({ re: new RegExp(re), name, bpm, energy, keys, arr, sd, notes });
+const GENRES = [
+  G('tech house|john summit|fisher\\b|dom dolla|chris lake|james hype', 'Tech House', 126, 7, ['F minor', 'G minor', 'A minor', 'C minor'],
+    [['Intro', 32, 'DJ-friendly: kick, hats and a filtered groove element only'], ['Groove', 32, 'Full offbeat bassline, vocal chop hook, percussion layers'], ['Breakdown', 16, 'Kick out, bass filtered up, riser and vocal tease'], ['Drop', 32, 'Peak: full sub, hook vocal, stabs, open hats'], ['Groove 2', 32, 'Variation: new vocal phrase, extra toms and shakers'], ['Outro', 32, 'Strip layers for the mix-out']],
+    [['Kick', 'Punchy, 55 Hz fundamental, 300 ms tail, tuned to key; sidechain source'], ['Sub-bass', 'Offbeat 8ths, sine/triangle, mono below 120 Hz, light drive'], ['Hats', '16th closed hats, 56% swing, open hat on the and of 4'], ['Vocal chop', 'Pitched one-shot, 1/8 dotted delay, high-passed at 200 Hz'], ['Stab', 'Detuned saw chord, 1.2 kHz low-pass, 150 ms decay']],
+    ['Sidechain the bass 4–6 dB to the kick', 'Keep everything mono below 120 Hz', 'Leave 2 dB headroom for the mixer']),
+  G('deep house|lo-?fi house', 'Deep House', 122, 5, ['A minor', 'D minor', 'E minor', 'G minor'],
+    [['Intro', 32, 'Soft kick, shaker, filtered Rhodes'], ['Verse', 32, 'Bassline enters, warm pad, vocal snippets'], ['Break', 16, 'Pad swells, no kick, long reverb tail'], ['Main', 32, 'Full groove, Rhodes chords, vocal hook'], ['Main 2', 32, 'Variation with extra percussion'], ['Outro', 32, 'Elements fade, pad lingers']],
+    [['Kick', 'Round, soft transient, 60 Hz, slightly long tail'], ['Bass', 'Warm analog sub with slow filter movement, legato'], ['Rhodes', 'Jazzy 7th chords, tremolo, tape saturation'], ['Pad', 'Wide, slow attack, 800 Hz low-pass'], ['Vocal', 'Breathy phrases, plate reverb, side-chained']],
+    ['Glue the mix with gentle bus compression', 'Keep the top end soft; roll off above 14 kHz', 'Automate the bass filter across 8-bar phrases']),
+  G('afro house|afro tech|black coffee|keinemusik', 'Afro House', 122, 6, ['D minor', 'A minor', 'B minor', 'F# minor'],
+    [['Intro', 32, 'Percussion build: congas, shakers, log drum'], ['Groove', 32, 'Kick and sub lock, chant vocal'], ['Break', 16, 'Vocal and perc only, swell into the drop'], ['Drop', 32, 'Full percussion stack, melodic lead'], ['Groove 2', 32, 'New vocal phrase, filtered pads'], ['Outro', 32, 'Percussion-only mix-out']],
+    [['Kick', 'Deep, round, 50 Hz, medium tail'], ['Log drum', 'Pitched percussion melody, short decay, tuned to key'], ['Congas', 'Layered organic percussion, 58% swing'], ['Chant vocal', 'Call-and-response phrases, light delay'], ['Lead', 'Marimba-style pluck with long delay']],
+    ['Give the percussion its own bus with light saturation', 'Pan hand percussion wide, keep kick and log drum centre', 'Keep swing consistent across all percussion']),
+  G('melodic techno|anyma|tale of us|artbat|afterlife', 'Melodic Techno', 124, 7, ['A minor', 'C minor', 'F minor', 'E minor'],
+    [['Intro', 32, 'Kick, rumble, arp hinted under a filter'], ['Build', 32, 'Arp opens, pad swells, hat pattern thickens'], ['Breakdown', 32, 'Kick out, lead melody carries, cinematic pad'], ['Drop', 32, 'Full arp, rumble bass, lead on top'], ['Groove', 32, 'Variation, filtered return of the lead'], ['Outro', 32, 'Rumble and hats only']],
+    [['Kick', 'Rumble kick: 50 Hz body, reverb-driven tail, side-chained bass'], ['Arp', 'Saw arpeggio, 1/16, resonant low-pass sweep'], ['Lead', 'Detuned saw lead, portamento, long delay'], ['Pad', 'Cinematic strings, wide stereo, slow attack'], ['Hats', 'Crisp 16ths with offbeat open hat']],
+    ['Keep the rumble under 100 Hz and mono', 'Automate the arp filter over 16 bars', 'Use a long pre-delay on the lead reverb']),
+  G('techno|charlotte de witte|amelie lens|adam beyer|hard techno|industrial', 'Techno', 134, 8, ['F minor', 'G minor', 'A minor', 'D minor'],
+    [['Intro', 32, 'Kick, rumble, ride; tool-like'], ['Groove', 32, 'Stab enters, percussion layers'], ['Break', 16, 'Kick out, rumble swells, noise riser'], ['Peak', 48, 'Full-on: stabs, acid line, rides'], ['Groove 2', 32, 'Filtered variation'], ['Outro', 32, 'Kick and rumble only']],
+    [['Kick', 'Hard, 50 Hz, distorted transient, 250 ms tail'], ['Rumble', 'Reverb on the kick, high-passed at 40 Hz, side-chained'], ['Stab', 'Short metallic FM hit, 1/16 delay'], ['Ride', 'Constant 1/8 ride with slow filter'], ['Acid', '303-style saw, resonant sweep']],
+    ['Keep the kick and rumble as one tight low-end object', 'Push the mix into gentle clipping for weight', 'Automate noise washes across transitions']),
+  G('trance|psytrance|armin|above & beyond|uplifting', 'Trance', 138, 8, ['A minor', 'E minor', 'F# minor', 'C minor'],
+    [['Intro', 32, 'Kick, rolling bass, gated hats'], ['Build', 32, 'Plucks, risers, snare roll'], ['Breakdown', 32, 'Lead melody with pads, no kick'], ['Drop', 48, 'Supersaw lead, full bass, crash'], ['Second build', 16, 'Snare roll into final drop'], ['Final drop', 32, 'Full peak energy'], ['Outro', 32, 'Kick and bass only']],
+    [['Kick', 'Tight, 55 Hz, short tail'], ['Rolling bass', 'Offbeat 1/16 saw bass, 200 Hz low-pass'], ['Supersaw lead', '7-voice detuned saw, wide chorus, 300 Hz high-pass'], ['Pluck', 'Short saw pluck with 1/8 dotted delay'], ['Pad', 'Lush, wide, slow attack']],
+    ['Sidechain everything to the kick', 'Keep the supersaw high-passed to leave room for bass', 'Use a reverse cymbal into every drop']),
+  G('drum ?(and|&|n|\'n\') ?bass|\\bdnb\\b|jungle|neurofunk|liquid', 'Drum & Bass', 174, 8, ['F minor', 'D minor', 'A minor', 'E minor'],
+    [['Intro', 32, 'Atmosphere, hints of the break'], ['Build', 16, 'Drums enter, riser'], ['Drop', 64, 'Full break, Reese bass, stabs'], ['Breakdown', 32, 'Pads and vocal, no drums'], ['Second drop', 64, 'Variation with switch-ups'], ['Outro', 32, 'Drums only']],
+    [['Break', 'Two-step break at 174, layered Amen hits, 1/16 ghost notes'], ['Reese bass', 'Detuned saws, phasing movement, mono below 150 Hz'], ['Sub', 'Clean sine sub following the Reese root'], ['Stab', 'Short rave stab with delay throws'], ['Pad', 'Atmospheric, high-passed at 400 Hz']],
+    ['Keep the sub a separate clean layer', 'Compress the break hard for snap', 'Use half-time variations for contrast']),
+  G('dubstep|riddim|skrillex|brostep|bass music', 'Dubstep', 140, 9, ['F minor', 'E minor', 'G minor', 'C# minor'],
+    [['Intro', 16, 'Melodic motif, vocal tease'], ['Build', 16, 'Snare roll, riser, vocal chop'], ['Drop', 32, 'Half-time drums, growl bass call and response'], ['Break', 16, 'Melodic reprise'], ['Second drop', 32, 'Switch-up with new growl patterns'], ['Outro', 16, 'Melodic wind-down']],
+    [['Kick', 'Heavy half-time kick, 50 Hz, layered click'], ['Snare', 'Huge layered snare on beat 3, 150 ms reverb'], ['Growl bass', 'FM/wavetable bass, formant modulation, multiband distortion'], ['Sub', 'Clean sine sub, mono'], ['Lead', 'Plucky melodic lead for the intro and breaks']],
+    ['Sidechain growls to the sub, not the kick', 'Keep the sub sine free of distortion', 'Give the snare the loudest transient in the mix']),
+  G('trap|hip.?hop|rap|drill|boom bap|drake|travis scott', 'Trap / Hip-Hop', 142, 7, ['C minor', 'F minor', 'G minor', 'D# minor'],
+    [['Intro', 8, 'Melody loop, vocal ad-libs'], ['Verse 1', 16, 'Full drums, 808 pattern'], ['Hook', 16, 'Melody opens, layered vocals'], ['Verse 2', 16, 'Drum variation, hat rolls'], ['Hook 2', 16, 'Full energy hook'], ['Bridge', 8, 'Drums out, melody only'], ['Hook 3', 16, 'Final hook'], ['Outro', 8, 'Melody fades']],
+    [['808', 'Long 808 with glide, saturated above 200 Hz, tuned to key'], ['Kick', 'Short click kick layered on the 808'], ['Hats', '1/16 hats with 1/32 rolls and pitch drops'], ['Snare', 'Tight clap-snare on 3, short room'], ['Melody', 'Dark bell or pluck loop, half-time feel']],
+    ['Keep the 808 the loudest low-end element', 'Pan hat rolls for movement', 'Leave space in the mids for the vocal']),
+  G('lo-?fi|chillhop|study beats|jazzhop', 'Lo-fi Hip-Hop', 82, 3, ['D minor', 'F major', 'A minor', 'G major'],
+    [['Intro', 8, 'Vinyl crackle, Rhodes chords'], ['A section', 16, 'Dusty drums, bass, chords'], ['B section', 16, 'Melody layer, sample vocal'], ['A section 2', 16, 'Drum variation'], ['Bridge', 8, 'Drums out, texture only'], ['A section 3', 16, 'Return with full elements'], ['Outro', 8, 'Chords and crackle fade']],
+    [['Drums', 'Dusty, swung 58%, low-passed at 8 kHz, tape saturation'], ['Bass', 'Round electric bass, legato'], ['Rhodes', 'Jazzy 7ths and 9ths, chorus, wow and flutter'], ['Texture', 'Vinyl crackle, rain, tape hiss'], ['Melody', 'Soft flute or guitar sample']],
+    ['Low-pass the master gently for warmth', 'Keep dynamics loose; avoid hard limiting', 'Add subtle pitch wobble to the chords']),
+  G('garage|2-?step|speed garage|uk bass|fred again|burial', 'UK Garage', 132, 6, ['F minor', 'G minor', 'A minor', 'D minor'],
+    [['Intro', 16, 'Vocal tease, shuffled hats'], ['Groove', 32, '2-step drums, sub, chopped vocal'], ['Break', 16, 'Vocal and pad'], ['Drop', 32, 'Full groove, organ stab, bass wobble'], ['Groove 2', 32, 'Variation'], ['Outro', 16, 'Drums fade']],
+    [['Drums', '2-step pattern, shuffled 1/16 hats, 62% swing'], ['Sub', 'Warm wobbling sub, speed-garage style'], ['Vocal chop', 'Pitched up R&B phrases, time-stretched'], ['Organ stab', 'M1-style organ, short, delayed'], ['Pad', 'Dark pad, high-passed at 300 Hz']],
+    ['Swing is everything: keep hats and vocal chops on the same groove', 'Side-chain the sub to the kick lightly', 'Use tape delay throws on vocal ends']),
+  G('disco|nu-?disco|funk|boogie|daft punk|french house|purple disco', 'Nu-Disco', 118, 6, ['A minor', 'D minor', 'E minor', 'C major'],
+    [['Intro', 16, 'Filtered loop, hats'], ['Groove', 32, 'Bass guitar, strings, clav'], ['Break', 16, 'Strings and vocal only'], ['Chorus', 32, 'Full band, brass stabs, vocal hook'], ['Groove 2', 32, 'Guitar solo or talkbox'], ['Outro', 16, 'Filtered fade']],
+    [['Drums', 'Live-feel kit, four-on-floor, open hat offbeats'], ['Bass', 'Slap or octave disco bass, 1/16 syncopation'], ['Strings', 'Lush disco strings, long notes'], ['Clav / guitar', 'Funky muted guitar, wah'], ['Brass', 'Stab hits on the chorus']],
+    ['Use a sweeping low-pass across the whole mix for transitions', 'Keep the bass slightly ahead of the beat', 'Add vinyl compression for glue']),
+  G('reggaeton|dembow|latin|bad bunny|moombahton', 'Reggaeton', 95, 6, ['A minor', 'D minor', 'E minor', 'F# minor'],
+    [['Intro', 8, 'Melody and vocal ad-lib'], ['Verse', 16, 'Dembow drums, bass'], ['Pre-chorus', 8, 'Build with riser'], ['Chorus', 16, 'Full hook, synth lead'], ['Verse 2', 16, 'Drum variation'], ['Chorus 2', 16, 'Hook'], ['Outro', 8, 'Drums out']],
+    [['Drums', 'Dembow pattern: kick on 1 and 3, snare on the and of 2 and 4'], ['Bass', 'Round sub following the chord roots'], ['Lead', 'Plucky synth melody, 1/8 delay'], ['Perc', 'Timbales and shakers'], ['Vocal', 'Doubled hook, pitch-shifted ad-libs']],
+    ['Keep the snare slightly dry and forward', 'Sidechain the bass lightly', 'Leave the top end for the vocal']),
+  G('ambient|downtempo|chill ?out|cinematic|drone', 'Ambient / Downtempo', 72, 2, ['C major', 'D major', 'A minor', 'E minor'],
+    [['Intro', 16, 'Drone and field recording'], ['Movement 1', 32, 'Pad chords, soft pulse'], ['Movement 2', 32, 'Melody enters, texture thickens'], ['Peak', 16, 'Full harmonic swell'], ['Outro', 32, 'Elements dissolve']],
+    [['Pad', 'Granular pad, slow attack, long reverb'], ['Drone', 'Low sustained tone, slight detune'], ['Pulse', 'Soft felt-piano pulse'], ['Texture', 'Field recordings, high-passed at 500 Hz'], ['Melody', 'Sparse bowed or bell lead']],
+    ['Let reverb tails overlap for continuity', 'Automate very slowly, over 32-bar spans', 'Avoid hard transients']),
+  G('pop|dance pop|radio|chorus', 'Dance Pop', 120, 6, ['C major', 'G major', 'A minor', 'F major'],
+    [['Intro', 8, 'Hook hinted on synth'], ['Verse 1', 16, 'Light drums, bass'], ['Pre-chorus', 8, 'Build'], ['Chorus', 16, 'Full hook, wide synths'], ['Verse 2', 16, 'Variation'], ['Chorus 2', 16, 'Hook'], ['Bridge', 8, 'Breakdown'], ['Final chorus', 16, 'Peak'], ['Outro', 8, 'Tag']],
+    [['Drums', 'Clean four-on-floor, layered clap'], ['Bass', 'Synth bass following roots, side-chained'], ['Synth', 'Bright poly chords, wide chorus'], ['Vocal', 'Doubled lead, stacked harmonies in the chorus'], ['FX', 'Risers, reverse cymbals, impacts']],
+    ['Keep the vocal 2–3 dB above everything', 'Use a limiter for consistent loudness', 'Make the chorus wider than the verse'])
+];
+const DEFAULT_GENRE = G('.', 'Festival EDM', 128, 8, ['F minor', 'G minor', 'A minor', 'C minor'],
+  [['Intro', 16, 'Hook motif on filtered synth, kick enters'], ['Build', 16, 'Snare roll, riser, pitch-up, vocal chop'], ['Drop', 32, 'Supersaw chords, big kick, white-noise crashes'], ['Breakdown', 16, 'Piano or pad with the vocal, no kick'], ['Build 2', 8, 'Faster snare roll, risers'], ['Drop 2', 32, 'Full festival energy, variation'], ['Outro', 16, 'Kick and bass mix-out']],
+  [['Kick', 'Big festival kick, 50 Hz body, layered top click, 350 ms tail'], ['Supersaw chords', '7-voice detuned saw stack, 150 Hz high-pass, wide'], ['Bass', 'Saw bass under the chords, side-chained hard'], ['Snare', 'Layered clap and snare with 1/16 to 1/32 rolls'], ['Riser', 'White-noise riser, upward band-pass sweep'], ['Vocal chop', 'Pitched phrase, formant shift, delay throw']],
+  ['Sidechain everything except the kick', 'High-pass the supersaws so the kick owns the low end', 'Automate a master low-pass into every drop']);
+const HYPE = /\b(aggressive|massive|hard|heavy|driving|festival|banger|peak|huge|frat|slam|raw|dirty|crazy|wild)\b/g;
+const CHILL = /\b(chill|deep|smooth|mellow|ambient|soft|dreamy|laid.?back|minimal|calm)\b/g;
+function hashStr(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+function keyFromText(p) { const m = p.match(/\b([a-g])(#|b|♯|♭)?\s*(minor|major|min\b|maj\b)/); if (!m) return null; const acc = m[2] === 'b' || m[2] === '♭' ? 'b' : m[2] ? '#' : ''; return m[1].toUpperCase() + acc + ' ' + (/^maj/.test(m[3]) ? 'major' : 'minor'); }
+function fxFromText(p, fx, log) {
+  if (/\b(sub|low.?end only|isolate (the )?bass|bass only)/.test(p)) { fx.lowpass_hz = Math.min(fx.lowpass_hz, 160); log.push('low-pass down to 160 Hz to isolate the sub'); }
+  else if (/\b(dark|muffled|underwater|low.?pass|lpf|warm|tunnel)/.test(p)) { fx.lowpass_hz = Math.min(fx.lowpass_hz, 1800); log.push('low-pass at 1.8 kHz for a darker tone'); }
+  if (/\b(bright|airy|crisp|open (the )?filter|clear)/.test(p)) { fx.lowpass_hz = 20000; log.push('low-pass fully open'); }
+  if (/\b(vocal|acapella|isolate (the )?vocals?|high.?pass|hpf|roll.?off|remove (the )?(low|mud)|no bass)/.test(p)) { const hz = /\bbuild/.test(p) ? 400 : 180; fx.highpass_hz = Math.max(fx.highpass_hz, hz); log.push('high-pass at ' + hz + ' Hz to clear the low end' + (/\bbuild/.test(p) ? ' (sweep it up across the build)' : '')); }
+  const bm = p.match(/(\d{2,3})\s*bpm/);
+  if (bm && state.bpm) { fx.tempo = clamp(+bm[1] / state.bpm, .5, 2); log.push('tempo ' + fx.tempo.toFixed(2) + '× to hit ' + bm[1] + ' BPM from the deck\'s ' + state.bpm.toFixed(1)); }
+  else if (/\b(half.?time|slow(er| down| it down)?|chopped|screwed)\b/.test(p)) { fx.tempo = Math.max(.5, +(fx.tempo * (/half/.test(p) ? .5 : .9)).toFixed(2)); log.push('tempo ' + fx.tempo.toFixed(2) + '× (slower, pitch locked)'); }
+  else if (/\b(faster|speed(ed)? up|uptempo|nightcore|sped up|quicker)\b/.test(p)) { fx.tempo = Math.min(2, +(fx.tempo * (/nightcore/.test(p) ? 1.25 : 1.1)).toFixed(2)); log.push('tempo ' + fx.tempo.toFixed(2) + '× (faster, pitch locked)'); }
+  if (/\b(louder|boost|massive|loud|slam|hotter|ceiling)\b/.test(p)) { fx.gain_db = Math.min(12, fx.gain_db + 3); log.push('gain +' + fx.gain_db.toFixed(1) + ' dB'); }
+  if (/\b(quieter|lower (the )?volume|turn (it )?down|softer|headroom)\b/.test(p)) { fx.gain_db = Math.max(-24, fx.gain_db - 3); log.push('gain ' + fx.gain_db.toFixed(1) + ' dB'); }
+}
+const SD_KEYWORDS = [
+  [/supersaw/, 'Supersaw', '7-voice detuned saw stack, 35% detune, 150 Hz high-pass, wide chorus'],
+  [/\b(sub.?bass|sub.?line|driving sub)/, 'Sub-bass', 'Driving offbeat sub, sine with 2nd-harmonic drive, mono below 120 Hz, side-chained 6 dB'],
+  [/\b(vocal|acapella)/, 'Vocal', 'Lead vocal phrases, high-passed at 180 Hz, 1/4 delay throws, plate reverb'],
+  [/\b(piano|keys)\b/, 'Piano', 'Stacked piano chords, tape saturation, side-chained to the kick'],
+  [/\b(acid|303)\b/, 'Acid line', '303-style saw, resonant low-pass sweep, accent slides'],
+  [/\b(pad|strings)\b/, 'Pad', 'Wide analog pad, slow attack, low-passed under the drop'],
+  [/\b(brass|horns?)\b/, 'Brass', 'Stab hits on the downbeats, short room reverb'],
+  [/\b(pluck)/, 'Pluck', 'Short saw pluck, 1/8 dotted delay, filter envelope'],
+  [/\b(guitar)/, 'Guitar', 'Muted funk guitar loop, light wah, panned left'],
+  [/\b808\b/, '808', 'Long 808 with glide, saturated above 200 Hz, tuned to key'],
+  [/\b(snare roll|roll)\b/, 'Snare roll', '1/8 to 1/16 to 1/32 roll, pitch rising 3 semitones, reverb opening up'],
+  [/\b(riser|sweep|white noise|noise)\b/, 'Riser', 'White-noise riser with upward band-pass sweep, 8-bar length'],
+  [/\b(kick)\b/, 'Kick', 'Heavy kick: 50 Hz fundamental, saturated transient, 380 ms tail, sidechain source'],
+  [/\b(clap|snare)\b/, 'Clap / snare', 'Layered clap and snare on 2 and 4, 120 ms room, 2 dB above the hats'],
+  [/\b(hats?|hi-?hats?)\b/, 'Hats', '16th closed hats with 56% swing, open hat on the offbeat']
+];
+function localBlueprint(prompt) {
+  const p = prompt.toLowerCase();
+  const g = GENRES.find(x => x.re.test(p)) || DEFAULT_GENRE;
+  const bm = p.match(/(\d{2,3})\s*bpm/);
+  const bpm = bm ? clamp(+bm[1], 60, 200) : g.bpm;
+  const h = hashStr(prompt);
+  const key = keyFromText(p) || g.keys[h % g.keys.length];
+  const hype = (p.match(HYPE) || []).length, chill = (p.match(CHILL) || []).length;
+  const energy = clamp(g.energy + hype - chill, 1, 10);
+  const mods = Array.from(new Set((p.match(HYPE) || []).concat(p.match(CHILL) || [])));
+  const words = prompt.replace(/[^\w\s#'&-]/g, ' ').split(/\s+/).filter(w => w && !/^(a|an|the|with|and|of|for|in|on|to|style|vibe|remix|track|like|some|that|this|my)$/i.test(w));
+  const title = (words.slice(0, 4).map(w => w[0].toUpperCase() + w.slice(1)).join(' ') || g.name) + ' Blueprint';
+  const arrangement = g.arr.map(a => ({ section: a[0], bars: a[1], notes: a[2] }));
+  const sound_design = g.sd.map(s => ({ element: s[0], spec: s[1] }));
+  SD_KEYWORDS.forEach(([re, el, spec]) => { if (re.test(p)) { const i = sound_design.findIndex(s => s.element.toLowerCase().includes(el.toLowerCase().split(' ')[0])); if (i >= 0) sound_design[i] = { element: el, spec }; else sound_design.push({ element: el, spec }); } });
+  if (sound_design.length > 7) sound_design.length = 7;
+  const fx = { tempo: 1, lowpass_hz: 20000, highpass_hz: 20, gain_db: 0, why: '' }; const log = [];
+  if (state.bpm && !bm) { fx.tempo = clamp(bpm / state.bpm, .5, 2); if (Math.abs(fx.tempo - 1) > 0.01) log.push('tempo ' + fx.tempo.toFixed(2) + '× to move the deck from ' + state.bpm.toFixed(1) + ' to ' + bpm + ' BPM'); }
+  fxFromText(p, fx, log);
+  fx.why = log.length ? log.join('; ') : 'Neutral rack: the deck already sits in the pocket for this style';
+  const mix_notes = g.notes.slice();
+  if (hype) mix_notes.push('Push the drop 2 dB hotter than the groove sections');
+  if (chill) mix_notes.push('Keep the master dynamic; no brick-wall limiting');
+  return { title, genre: g.name + (mods.length ? ' · ' + mods.join(', ') : ''), bpm, key, energy, arrangement, sound_design, fx_rack: fx, mix_notes, changelog: [] };
+}
+function localModify(prev, prompt) {
+  const bp = JSON.parse(JSON.stringify(prev)); bp.changelog = []; const log = bp.changelog; const p = prompt.toLowerCase();
+  const bm = p.match(/(\d{2,3})\s*bpm/); if (bm) { bp.bpm = clamp(+bm[1], 40, 220); log.push('Tempo set to ' + bp.bpm + ' BPM'); }
+  const k = keyFromText(p); if (k) { bp.key = k; log.push('Key changed to ' + k); }
+  const secPerBar = 240 / bp.bpm;
+  const secRe = /(\d+)\s*(?:more\s*)?(?:s|sec|secs|seconds?)\b/, barRe = /(\d+)\s*bars?\b/;
+  const secM = p.match(secRe), barM = p.match(barRe);
+  const extend = /\b(continue|extend|another|more|add|append|keep going|longer|insert|put)\b/.test(p) || secM || barM;
+  const cap = w => w[0].toUpperCase() + w.slice(1);
+  const nameFor = txt => { const vm = txt.match(/\b(verse|chorus|hook)\b/); return /\bbuild/.test(txt) ? (/\b(vocal|high.?pass|hpf|filter)/.test(txt) ? 'Filter build' : 'Build') : /\bdrop\b/.test(txt) ? 'Drop 2' : /\bbreak/.test(txt) ? 'Breakdown' : /\boutro\b/.test(txt) ? 'Outro' : /\bintro\b/.test(txt) ? 'Intro' : /\bbridge\b/.test(txt) ? 'Bridge' : vm ? cap(vm[1]) : null; };
+  const clauses = prompt.split(/\bthen\b|;|\.\s|,\s*(?=and\b|then\b|add\b)/i).map(c => c.trim()).filter(Boolean);
+  const clauseWith = re => clauses.find(c => re.test(c.toLowerCase())) || prompt;
+  const adds = [];
+  if (secM) { const c = clauseWith(secRe); adds.push({ name: (barM ? null : nameFor(c.toLowerCase())) || 'Continuation', bars: clamp(Math.max(4, Math.round(+secM[1] / secPerBar / 4) * 4), 4, 128), notes: short(c, 200), asked: secM[1] + ' s' }); }
+  if (barM) { const c = clauseWith(barRe); adds.push({ name: nameFor(c.toLowerCase()) || nameFor(p) || 'Section', bars: clamp(+barM[1], 2, 128), notes: short(c, 200), asked: '' }); }
+  if (!adds.length && extend) adds.push({ name: nameFor(p) || 'Extension', bars: 16, notes: short(prompt, 200), asked: '' });
+  adds.forEach(a => {
+    const sec = { section: a.name, bars: a.bars, notes: a.notes };
+    const outro = bp.arrangement.findIndex(x => /outro/i.test(x.section));
+    if (a.name === 'Intro') bp.arrangement.unshift(sec); else if (a.name !== 'Outro' && outro > 0) bp.arrangement.splice(outro, 0, sec); else bp.arrangement.push(sec);
+    log.push('Added "' + a.name + '" · ' + a.bars + ' bars ≈ ' + fmtTime(a.bars * secPerBar) + (a.asked ? ' (asked for ' + a.asked + ')' : ''));
+  });
+  if (bp.arrangement.length > 16) bp.arrangement.length = 16;
+  SD_KEYWORDS.forEach(([re, el, spec]) => {
+    if (!re.test(p)) return;
+    const i = bp.sound_design.findIndex(s => s.element.toLowerCase().includes(el.toLowerCase().split(' ')[0]));
+    const s2 = /\b(heav|hard|big|punch|aggress|massive)/.test(p) ? spec : spec;
+    if (i >= 0) { bp.sound_design[i].spec = s2; log.push('Updated ' + el + ': ' + s2); } else { bp.sound_design.push({ element: el, spec: s2 }); log.push('Added ' + el + ': ' + s2); }
+  });
+  if (bp.sound_design.length > 8) bp.sound_design.length = 8;
+  if (/\b(aggressive|harder|heavier|more energy|bigger|massive|hype)\b/.test(p)) { bp.energy = Math.min(10, bp.energy + 1); log.push('Energy up to ' + bp.energy + '/10'); }
+  if (/\b(softer|calmer|chill|less energy|strip(ped)? back|minimal|quieter)\b/.test(p)) { bp.energy = Math.max(1, bp.energy - 1); log.push('Energy down to ' + bp.energy + '/10'); }
+  const fxLog = []; fxFromText(p, bp.fx_rack, fxLog);
+  if (fxLog.length) { bp.fx_rack.why = fxLog.join('; '); fxLog.forEach(x => log.push('FX rack: ' + x)); }
+  bp.mix_notes.push('Mod: ' + short(prompt, 120)); if (bp.mix_notes.length > 8) bp.mix_notes.shift();
+  if (!log.length) log.push('Logged as a production note: ' + short(prompt, 120));
+  return bp;
+}
+
+/* ---------- run + render ---------- */
+const ERR_COPY = {
+  rate_limited: 'Claude is rate-limited for this view right now. Showing the on-device result; try Claude again in a minute.',
+  session_expired: 'Your Claude session expired. Sign in again to use the Claude engine; on-device result shown.',
+  refused: 'Claude declined this prompt. Rephrase it; on-device result shown.',
+  empty_completion: 'Claude returned nothing. Try a shorter prompt; on-device result shown.',
+  invalid_json: 'Claude\'s reply could not be parsed. Try again; on-device result shown.',
+  prompt_too_large: 'The prompt was too large for Claude. Shorten it; on-device result shown.',
+  upstream_error: 'Connection hiccup reaching Claude. Try again; on-device result shown.'
+};
+const HIDE_CODES = ['not_granted', 'sampling_disabled', 'not_declared', 'capability_disabled', 'capability_removed', 'tools_unavailable'];
+async function runAi(req) {
+  if (state.aiBusy) return;
+  setAiBusy(true);
+  let bp = null, source = 'on-device', note = '';
+  if (state.engine === 'claude' && sampleFn) {
+    state.ctl = new AbortController();
+    aiStatus('Thinking… Claude is ' + (req.kind === 'mod' ? 'revising' : 'drafting') + ' the blueprint. The first call asks you to allow it.', 'busy');
+    try {
+      const opts = { signal: state.ctl.signal, modelTier: 'default', onText: ({ text }) => aiStatus('Writing… ' + text.length + ' characters so far', 'busy') };
+      if (req.kind === 'mod') opts.cache = false;
+      const raw = await sampleFn.json(buildPrompt(req), opts);
+      bp = normalizeBlueprint(raw); source = 'claude';
+    } catch (e) {
+      const code = e && e.code ? e.code : 'upstream_error';
+      if (code === 'cancelled') { aiStatus('Stopped.', ''); setAiBusy(false); return; }
+      if (HIDE_CODES.includes(code)) { aiOffline('On-device'); note = 'Claude is not available in this view, so the on-device engine answered instead.'; }
+      else note = ERR_COPY[code] || ERR_COPY.upstream_error;
+    }
+  }
+  if (!bp) { try { bp = req.kind === 'mod' ? localModify(req.prev, req.prompt) : localBlueprint(req.prompt); } catch (e) { aiStatus('The on-device engine hit an error: ' + (e && e.message ? e.message : e), 'err'); setAiBusy(false); return; } }
+  commitBlueprint(bp, req, source);
+  aiStatus(note || ('Blueprint v' + state.versions.length + ' ready · ' + (source === 'claude' ? 'written by Claude' : 'on-device engine') + (req.kind === 'mod' ? ' · ' + bp.changelog.length + ' change' + (bp.changelog.length === 1 ? '' : 's') : '')), note ? 'err' : 'ok');
+  setAiBusy(false);
+}
+function commitBlueprint(bp, req, source) {
+  state.versions.push({ bp, kind: req.kind, prompt: req.prompt, source, at: new Date() });
+  state.active = state.versions.length - 1;
+  renderVersions(); renderBlueprint();
+  $('btnMod').disabled = false;
+}
+function renderVersions() {
+  const box = $('versions'); box.textContent = '';
+  state.versions.forEach((v, i) => {
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'ver' + (i === state.active ? ' active' : '');
+    b.textContent = 'v' + (i + 1) + ' ' + (v.kind === 'mod' ? 'MOD' : 'BLUEPRINT') + ' · ' + short(v.prompt, 34);
+    b.title = v.prompt; b.addEventListener('click', () => { state.active = i; renderVersions(); renderBlueprint(); });
+    box.appendChild(b);
+  });
+}
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+function renderBlueprint() {
+  const box = $('blueprint'); box.textContent = '';
+  const v = state.versions[state.active]; if (!v) return; const bp = v.bp;
+  const head = el('div', 'bp-head');
+  head.appendChild(el('div', 'bp-src', 'v' + (state.active + 1) + ' · ' + (v.source === 'claude' ? 'Claude' : 'on-device engine') + ' · ' + v.at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })));
+  head.appendChild(el('div', 'bp-title', bp.title));
+  if (bp.genre) head.appendChild(el('div', 'bp-genre', bp.genre));
+  const chips = el('div', 'bp-chips');
+  const chip = (label, val) => { const c = el('div', 'bp-chip'); c.appendChild(el('span', null, label)); c.appendChild(el('b', null, val)); return c; };
+  chips.appendChild(chip('BPM', String(bp.bpm))); chips.appendChild(chip('Key', bp.key));
+  const totalBars = bp.arrangement.reduce((a, s) => a + s.bars, 0), secPerBar = 240 / bp.bpm;
+  chips.appendChild(chip('Length', fmtTime(totalBars * secPerBar)));
+  const ec = el('div', 'bp-chip'); ec.appendChild(el('span', null, 'Energy ' + bp.energy + '/10')); const en = el('div', 'energy');
+  for (let i = 0; i < 10; i++) { const bar = el('i', i < bp.energy ? 'on' : ''); bar.style.height = (4 + i * 1.3) + 'px'; en.appendChild(bar); } ec.appendChild(en); chips.appendChild(ec);
+  head.appendChild(chips); box.appendChild(head);
+  if (bp.changelog.length) { const s = el('div', 'bp-sec'); s.appendChild(el('h3', null, 'What changed in this version')); const ul = el('ul', 'bp-notes changelog'); bp.changelog.forEach(c => ul.appendChild(el('li', null, c))); s.appendChild(ul); box.appendChild(s); }
+  const arr = el('div', 'bp-sec'); arr.appendChild(el('h3', null, 'Arrangement · ' + totalBars + ' bars'));
+  const wrap = el('div', 'timeline-wrap'), tl = el('div', 'timeline'); let bar = 0;
+  bp.arrangement.forEach(s => { const b = el('div', 'tl-block'); b.style.flex = s.bars + ' 1 0'; b.appendChild(el('b', null, s.section)); b.appendChild(el('span', null, s.bars + ' bars · ' + fmtTime(bar * secPerBar))); b.title = s.section + ': ' + s.notes; tl.appendChild(b); bar += s.bars; });
+  wrap.appendChild(tl); arr.appendChild(wrap);
+  arr.appendChild(el('div', 'tl-total', totalBars + ' bars ≈ ' + fmtTime(totalBars * secPerBar) + ' at ' + bp.bpm + ' BPM · ' + secPerBar.toFixed(2) + ' s per bar'));
+  const sl = el('ul', 'bp-list'); bp.arrangement.forEach(s => { if (!s.notes) return; const li = el('li'); li.appendChild(el('b', null, s.section + ' · ' + s.bars)); li.appendChild(el('span', null, s.notes)); sl.appendChild(li); });
+  if (sl.children.length) arr.appendChild(sl);
+  box.appendChild(arr);
+  if (bp.sound_design.length) { const s = el('div', 'bp-sec'); s.appendChild(el('h3', null, 'Sound design')); const ul = el('ul', 'bp-list'); bp.sound_design.forEach(d => { const li = el('li'); li.appendChild(el('b', null, d.element)); li.appendChild(el('span', null, d.spec)); ul.appendChild(li); }); s.appendChild(ul); box.appendChild(s); }
+  const fx = bp.fx_rack; const target = { tempo: state.bpm ? clamp(bp.bpm / state.bpm, .5, 2) : fx.tempo, lpf: fx.lowpass_hz, hpf: fx.highpass_hz, gain: fx.gain_db };
+  const fs = el('div', 'bp-sec'); fs.appendChild(el('h3', null, 'FX rack suggestion for the loaded deck'));
+  const row = el('div', 'fx-suggest');
+  const kv = (k, val) => { const d = el('span', 'kv', k + ' '); d.appendChild(el('b', null, val)); return d; };
+  row.appendChild(kv('Tempo', target.tempo.toFixed(2) + '×' + (state.bpm ? ' (' + state.bpm.toFixed(0) + '→' + bp.bpm + ')' : '')));
+  row.appendChild(kv('LPF', fmtHz(target.lpf))); row.appendChild(kv('HPF', fmtHz(target.hpf))); row.appendChild(kv('Gain', (target.gain >= 0 ? '+' : '') + target.gain.toFixed(1) + ' dB'));
+  const ab = el('button', 'btn primary sm', 'Apply to FX rack'); ab.type = 'button'; ab.addEventListener('click', () => { animateRackTo(target); ab.textContent = 'Applied'; setTimeout(() => ab.textContent = 'Apply to FX rack', 1400); });
+  row.appendChild(ab);
+  if (fx.why) row.appendChild(el('div', 'why', fx.why));
+  fs.appendChild(row); box.appendChild(fs);
+  if (bp.mix_notes.length) { const s = el('div', 'bp-sec'); s.appendChild(el('h3', null, 'Mix notes')); const ul = el('ul', 'bp-notes'); bp.mix_notes.forEach(n => ul.appendChild(el('li', null, n))); s.appendChild(ul); box.appendChild(s); }
+}
+$('btnBlueprint').addEventListener('click', () => {
+  const prompt = $('promptBlueprint').value.trim();
+  if (!prompt) { aiStatus('Type a style or artist vibe in the blueprint prompt first.', 'err'); $('promptBlueprint').focus(); return; }
+  runAi({ kind: 'blueprint', prompt });
+});
+$('btnMod').addEventListener('click', () => {
+  const prompt = $('promptMod').value.trim();
+  if (!prompt) { aiStatus('Type a modification or continuation request first.', 'err'); $('promptMod').focus(); return; }
+  const v = state.versions[state.active]; if (!v) { aiStatus('Generate a blueprint first, then modify it.', 'err'); return; }
+  runAi({ kind: 'mod', prompt, prev: v.bp });
+});
+[['promptBlueprint', 'btnBlueprint'], ['promptMod', 'btnMod']].forEach(([ta, btn]) => $(ta).addEventListener('keydown', e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); $(btn).click(); } }));
+
+/* ---------- boot ---------- */
+refreshRackUI();
+requestAnimationFrame(tick);
+initAi();
+loadDemo();
+})();
+</script>
