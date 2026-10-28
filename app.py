@@ -88,15 +88,40 @@ MEDIA_LOCK = threading.Lock()
 MEDIA: dict = {}  # id -> {"path": Path, "name": str, "kind": "upload"|"output", "ctype": str, "rep_url": str, "rep_at": float}
 
 
+REGISTRY = DATA / "media.json"
+
+
 def new_id() -> str:
     return secrets.token_hex(8)
 
 
-def register_media(path: Path, name: str, kind: str) -> str:
-    mid = new_id()
+def save_registry() -> None:
+    with MEDIA_LOCK:
+        snap = {k: {"path": str(v["path"]), "name": v["name"], "kind": v["kind"], "ctype": v["ctype"], "pcm": v.get("pcm")} for k, v in MEDIA.items()}
+    tmp = REGISTRY.with_suffix(".tmp")
+    tmp.write_text(json.dumps(snap), encoding="utf-8")
+    tmp.replace(REGISTRY)
+
+
+def load_registry() -> int:
+    try:
+        snap = json.loads(REGISTRY.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return 0
+    with MEDIA_LOCK:
+        for k, v in snap.items():
+            if ID_RE.match(k) and isinstance(v, dict) and Path(v.get("path", "")).exists():
+                MEDIA[k] = {"path": Path(v["path"]), "name": v.get("name", k), "kind": v.get("kind", "output"), "ctype": v.get("ctype", "audio/wav"),
+                            "rep_url": "", "rep_at": 0.0, "pcm": v.get("pcm")}
+        return len(MEDIA)
+
+
+def register_media(path: Path, name: str, kind: str, mid: str = None) -> str:
+    mid = mid or new_id()
     ctype = "audio/wav" if path.suffix.lower() in (".wav", ".wave") else (mimetypes.guess_type(path.name)[0] or "application/octet-stream")
     with MEDIA_LOCK:
         MEDIA[mid] = {"path": path, "name": name, "kind": kind, "ctype": ctype, "rep_url": "", "rep_at": 0.0, "pcm": None}
+    save_registry()
     return mid
 
 
@@ -389,12 +414,12 @@ def quantize_to_grid(sr: int, audio: np.ndarray, strength: float = 1.0, bpm_hint
     bar = 4 * beat
     start = down
     end = dst_pts[-1]
-    # musical length follows the last transient; a decay tail only adds a bar when it runs
-    # more than one beat past that bar line
-    floor_st = 0.25 * np.percentile([st for _, st in slots.values()], 75) if slots else 0.0
-    strong = [k for k, (_, st) in slots.items() if st >= floor_st]
-    last_k = max(strong) if strong else (max(slots) if slots else 0)
-    bars = max(1, last_k // 16 + 1, int(np.ceil((end - start) / bar - 0.25)))
+    # whole bars only: a partial last bar shorter than half a bar is trimmed, a longer one is padded
+    span = (end - start) / bar
+    full = int(np.floor(span + 1e-6))
+    bars = full + 1 if (full < 1 or span - full >= 0.5) else full
+    tail = (end - start) - bars * bar
+    tail_note = f"trimmed {tail:.2f} s tail" if tail > 0.01 else f"padded {-tail:.2f} s to the bar line" if tail < -0.01 else "ends on the bar line"
     out_len = int(round(bars * bar * sr))
     t_out = np.arange(out_len) / sr + start
     t_src = np.interp(t_out, dst_pts, src_pts)
@@ -416,7 +441,7 @@ def quantize_to_grid(sr: int, audio: np.ndarray, strength: float = 1.0, bpm_hint
         bpm=round(bpm, 2), onsets=int(len(onsets)), snapped=len(shifts),
         mean_shift_ms=round(float(np.mean(shifts)) * 1000, 1) if shifts else 0.0,
         max_shift_ms=round(float(np.max(shifts)) * 1000, 1) if shifts else 0.0,
-        bars=bars, downbeat_trim_ms=round(down * 1000, 1), grid="1/16 at " + str(round(bpm, 2)) + " BPM",
+        bars=bars, downbeat_trim_ms=round(down * 1000, 1), grid="1/16 at " + str(round(bpm, 2)) + " BPM", tail=tail_note,
         note="snapped " + str(len(shifts)) + " of " + str(len(onsets)) + " transients at strength " + str(strength))
     return out, report
 
@@ -581,11 +606,20 @@ JOBS_LOCK = threading.Lock()
 JOBS: dict = {}
 
 
+PROGRESS_RE = re.compile(r"^replicate ▸ \d+\s*/\s*\d+$")
+
+
 def job_emit(job: dict, line: str) -> None:
+    entry = f"{datetime.now().strftime('%H:%M:%S')} {line}"
+    progress = bool(PROGRESS_RE.match(line))
     with JOBS_LOCK:
-        job["log"].append(f"{datetime.now().strftime('%H:%M:%S')} {line}")
+        if progress and job["log"] and PROGRESS_RE.match(job["log"][-1].split(" ", 1)[1]):
+            job["log"][-1] = entry  # one live counter instead of hundreds of lines
+        else:
+            job["log"].append(entry)
         job["log"] = job["log"][-200:]
-    log(f"job {job['id']}: {line}")
+    if not progress:
+        log(f"job {job['id']}: {line}")
 
 
 def set_stage(job: dict, stage: str, progress: float) -> None:
@@ -656,7 +690,7 @@ def run_job(job: dict) -> None:
             emit(report["note"] + (f" · {report['bpm']} BPM · {report['bars']} bars" if report.get("bpm") else ""))
         final = OUTPUTS / f"{out_id}.wav"
         write_wav(final, sr, audio)
-        mid = register_media(final, f"{job['label']}.wav", "output")
+        mid = register_media(final, f"{job['label']}.wav", "output", out_id)
         with JOBS_LOCK:
             job["result"] = {
                 "id": mid, "file": f"/media/{mid}.wav", "name": f"{job['label']}.wav", "mode": mode, "prompt": job["prompt"],
@@ -1095,6 +1129,9 @@ def main() -> None:
         sys.exit(selftest())
     UPLOADS.mkdir(parents=True, exist_ok=True)
     OUTPUTS.mkdir(parents=True, exist_ok=True)
+    known = load_registry()
+    if known:
+        log(f"restored {known} media entries from {REGISTRY.name}")
     if not TOKEN:
         log("WARNING: REPLICATE_API_TOKEN is not set; generation jobs will fail until it is (quantize-only still works)")
     log(f"model {MODEL}{'@' + MODEL_VERSION if MODEL_VERSION else ''} · ffmpeg {'found' if FFMPEG else 'missing'} · data in {DATA}")
