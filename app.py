@@ -483,11 +483,49 @@ def rep_upload(media: dict, emit) -> str:
     return url
 
 
+RESOLVED_VERSION = {"id": MODEL_VERSION}
+
+
+def rep_model_version(emit) -> str:
+    """Latest version hash of MODEL, looked up once; needed because only official models
+    accept predictions without a version."""
+    if RESOLVED_VERSION["id"]:
+        return RESOLVED_VERSION["id"]
+    info = rep_request("GET", f"{API}/models/{MODEL}")
+    vid = ((info.get("latest_version") or {}).get("id")) if isinstance(info, dict) else None
+    if not vid:
+        raise ReplicateError(f"{MODEL} has no published version to run")
+    RESOLVED_VERSION["id"] = vid
+    emit(f"resolved {MODEL} to version {vid[:12]}…")
+    return vid
+
+
+def rep_create(url: str, payload: dict, emit, cancel: threading.Event):
+    """Create a prediction, waiting out Replicate's 429 throttle window (it names the reset time)."""
+    for attempt in range(5):
+        try:
+            return rep_request("POST", url, payload)
+        except ReplicateError as e:
+            msg = str(e)
+            if "HTTP 429" in msg and attempt < 4 and not cancel.is_set():
+                m = re.search(r"resets? in ~?(\d+)\s*s", msg)
+                wait = (int(m.group(1)) + 2) if m else 15
+                emit(f"Replicate rate limit: waiting {wait} s, then retrying ({attempt + 1}/4)")
+                time.sleep(wait)
+                continue
+            raise
+
+
 def rep_predict(inputs: dict, emit, cancel: threading.Event):
-    if MODEL_VERSION:
-        res = rep_request("POST", API + "/predictions", {"version": MODEL_VERSION, "input": inputs})
+    if RESOLVED_VERSION["id"]:
+        res = rep_create(API + "/predictions", {"version": RESOLVED_VERSION["id"], "input": inputs}, emit, cancel)
     else:
-        res = rep_request("POST", f"{API}/models/{MODEL}/predictions", {"input": inputs})
+        try:
+            res = rep_create(f"{API}/models/{MODEL}/predictions", {"input": inputs}, emit, cancel)
+        except ReplicateError as e:
+            if "404" not in str(e):
+                raise
+            res = rep_create(API + "/predictions", {"version": rep_model_version(emit), "input": inputs}, emit, cancel)
     pid = res.get("id")
     get_url = (res.get("urls") or {}).get("get") or f"{API}/predictions/{pid}"
     cancel_url = (res.get("urls") or {}).get("cancel")
